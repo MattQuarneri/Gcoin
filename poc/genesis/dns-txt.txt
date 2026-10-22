@@ -1,0 +1,13 @@
+# DNS cross-bind for the Gcoin genesis attestation (spec §9B)
+# Add this TXT record at your DNS host (Dreamhost panel):
+
+Host:  _gcoin.monytyme.com
+Type:  TXT
+Value: gcoin-genesis=GENESIS_BLOCK_HASH_SHA256; founder=did:web:monytyme.com; statement=https://monytyme.com/.well-known/gcoin.json
+
+# Why: the genesis claim then exists in three places that must agree —
+#   1. https://monytyme.com/.well-known/did.json   (the genesis key)
+#   2. https://monytyme.com/.well-known/gcoin.json (the signed statement + genesis hash)
+#   3. this DNS TXT record                            (the genesis hash, in DNS)
+# The genesis block (ledger event 0) embeds hashes of 1 and 2; chain_id = SHA-256(domain || genesis_statement).
+# At launch, also anchor the genesis hash on a public blockchain so provenance survives even the domain.

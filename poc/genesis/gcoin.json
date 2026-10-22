@@ -1,0 +1,31 @@
+{
+  "dns_cross_bind": "_gcoin.monytyme.com TXT \"gcoin-genesis=GENESIS_BLOCK_HASH_SHA256\"",
+  "founder_did": "did:web:monytyme.com",
+  "genesis": {
+    "chain_id": "SHA256(domain || genesis_statement) — computed at founding",
+    "genesis_block_hash": "GENESIS_BLOCK_HASH_SHA256",
+    "timestamp_utc": "GENESIS_TIMESTAMP_UTC"
+  },
+  "network": "Gcoin",
+  "parameters": {
+    "accrual": "1 Mortal Minute per minute",
+    "day_window": "[04:00 user-local, 04:00 user-local next day)",
+    "default_sharing_level": "L0 (zero-knowledge proof only)",
+    "issuance_per_day": 1440,
+    "ledger_clock": "UTC",
+    "pay_day_local_time": "04:00",
+    "provenance": "hash-bound to email + photo; separable by spender",
+    "rolling_24h_issuance_cap": 1440,
+    "symbol": "₲",
+    "unit": "1 ₲ = 1 Mortal Minute = 60 seconds"
+  },
+  "protocol": "Relative Gratitude Protocol (RGP)",
+  "signature": {
+    "key": "did:web:monytyme.com#genesis-key-1",
+    "signed_payload": "canonical JSON of this document without this signature block (JCS / RFC 8785)",
+    "type": "Ed25519",
+    "value": "GENESIS_SIGNATURE_BASE64URL"
+  },
+  "statement": "The controller of this domain attests that the Gcoin network originates here: its genesis block, issuance rules, and ledger descend from this attestation.",
+  "version": "poc-0.2"
+}

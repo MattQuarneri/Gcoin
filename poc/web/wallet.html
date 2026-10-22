@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>₲ Gcoin Wallet — POC</title>
+<style>
+  :root{ --bg:#0e1116; --card:#171c24; --card2:#1e2530; --line:#2a3342; --txt:#e8edf4; --dim:#9fb0c3; --gold:#f2b134; --green:#43d17c; --red:#ff6b6b; --blue:#5eb1ff; }
+  *{box-sizing:border-box} body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt)}
+  header{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:20px;margin:0} header h1 span{color:var(--gold)}
+  .avatar{width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);background:var(--card2)}
+  .did{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--dim);word-break:break-all}
+  main{max-width:1180px;margin:0 auto;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h2{margin:0 0 10px;font-size:15px;color:var(--gold);letter-spacing:.4px;text-transform:uppercase}
+  .card h3{margin:14px 0 6px;font-size:13px;color:var(--dim)}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px dashed #232b38;font-size:14px}
+  .row:last-child{border-bottom:none} .row b{font-variant-numeric:tabular-nums}
+  .big{font-size:26px;font-weight:700} .gold{color:var(--gold)} .green{color:var(--green)} .red{color:var(--red)} .dim{color:var(--dim)} .small{font-size:12px}
+  button{background:var(--gold);color:#191203;border:0;border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer;font-size:14px}
+  button.ghost{background:var(--card2);color:var(--txt);border:1px solid var(--line)}
+  button.danger{background:#3a1d1d;color:#ffb3b3;border:1px solid #5c2b2b}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select,textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:9px;color:var(--txt);padding:9px;font-size:14px;margin:4px 0 10px}
+  textarea{font-family:ui-monospace,Menlo,monospace;font-size:11px;min-height:64px}
+  label{font-size:12px;color:var(--dim);display:block;margin-top:6px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .log{font-family:ui-monospace,Menlo,monospace;font-size:11px;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+  .log div{padding:3px 0;border-bottom:1px solid #20283475}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;background:var(--card2);border:1px solid var(--line);font-size:11px;margin:2px 2px 2px 0}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:22px;background:#222b38;border:1px solid var(--gold);color:var(--txt);padding:11px 18px;border-radius:12px;font-size:14px;display:none;z-index:50;max-width:88vw}
+  #createWrap{max-width:560px;margin:30px auto;padding:0 16px}
+  .bar{height:10px;background:var(--card2);border-radius:6px;overflow:hidden;margin:6px 0 2px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--green))}
+  #sheet{display:none;background:#fff;color:#111;padding:28px;max-width:640px;margin:0 auto;font-family:Georgia,serif}
+  #sheet h2{color:#111;text-transform:none;letter-spacing:0}
+  #sheet canvas{border:1px solid #ccc}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;word-break:break-all}
+  @media print{ body>*{display:none!important} #sheet{display:block!important} }
+</style>
+</head>
+<body>
+<header>
+  <img id="avatar" class="avatar" alt="" style="display:none">
+  <div style="flex:1;min-width:200px">
+    <h1>₲ Gcoin <span>Wallet</span> <span class="small dim" style="color:var(--dim)">POC · knot/strands · WebAuthn-ready</span></h1>
+    <div id="who" class="did">no wallet yet</div>
+  </div>
+  <div class="small dim" id="clockBox"></div>
+</header>
+
+<div id="createWrap" style="display:none">
+  <div class="card">
+    <h2>Create your Gcoin wallet</h2>
+    <p class="small dim">One identity, many keys. Your wallet lives in this browser (IndexedDB + OPFS where available). Network genesis attested by <b>did:web:monytyme.com</b>.</p>
+    <label>Your name</label><input id="cName" placeholder="e.g. Matthew">
+    <label>Email (bound into coin provenance as a hash — never stored on the ledger in plain text)</label><input id="cEmail" placeholder="you@example.com">
+    <label>Photo (optional — becomes your provenance photo hash)</label><input id="cPhoto" type="file" accept="image/*">
+    <div class="btnrow"><button id="btnCreate">Create wallet</button>
+    <button class="ghost" id="btnImport1">Restore from backup file</button>
+    <input type="file" id="fileImport1" accept="application/json" style="display:none"></div>
+    <p class="small dim">POC note: the in-browser device key stands in for a WebAuthn passkey (same role, exportable for the demo). Use “Try a real WebAuthn passkey” after creating, on https/localhost.</p>
+  </div>
+</div>
+
+<main id="app" style="display:none">
+  <section class="card" id="accrualCard">
+    <h2>Accrual book — today's mortal minutes</h2>
+    <div class="big"><span class="gold">₲</span><span id="accruedCoins" class="gold">0</span> <span class="small dim">accrued today</span></div>
+    <div class="bar"><i id="accrBar" style="width:0%"></i></div>
+    <div class="row"><span>Window (04:00 → 04:00 local)</span><b id="winLbl">—</b></div>
+    <div class="row"><span>Accrued</span><b id="accrSec">0 s</b></div>
+    <div class="row"><span>🪙 Dyme — first 10 s to accountant pool</span><b id="dymeSec">0 s</b></div>
+    <div class="row"><span>Committed (streams)</span><b id="commitSec">0 s</b></div>
+    <div class="row"><span>Spent from accrual</span><b id="spentSec">0 s</b></div>
+    <div class="row"><span><b>Spendable now</b></span><b class="green" id="spendSec">0 s</b></div>
+    <div class="row"><span>Projected at Pay Day</span><b>₲1,440 (86,400 s)</b></div>
+    <label class="small"><input type="checkbox" id="demoSpeed" style="width:auto"> Demo accelerator ×60 (1 minute per second — watch Pay Day arrive)</label>
+  </section>
+
+  <section class="card">
+    <h2>Cash book — settled Gratitude</h2>
+    <div class="big"><span class="green">₲</span><span id="gcCoins" class="green">0</span> <span class="small dim">Gratitude held (cash book)</span></div>
+    <div class="row"><span>Balance (exact)</span><b id="gcSec">0 s</b></div>
+    <div class="row"><span>Received today</span><b id="gcInToday">0 s</b></div>
+    <div class="row"><span>Sent today</span><b id="gcOutToday">0 s</b></div>
+    <h3>Contacts (demo peers)</h3>
+    <div id="contacts"></div>
+  </section>
+
+  <section class="card">
+    <h2>Send Gratitude — attest → assert → affirm</h2>
+    <label>Recipient</label><select id="sendTo"></select>
+    <label>Amount (₲ — 1 ₲ = 1 mortal minute)</label><input id="sendAmt" type="number" min="1" value="5">
+    <label>Data-sharing level (§4 — default L0 ZK)</label>
+    <select id="sendLevel">
+      <option value="L0">L0 — ZK proof only (default)</option>
+      <option value="L1">L1 — + my DID (pseudonymous)</option>
+      <option value="L2">L2 — + email &amp; photo provenance (attributed)</option>
+      <option value="L3">L3 — full disclosure + note as a collectible</option>
+    </select>
+    <label>Note (only shared at L3)</label><input id="sendNote" placeholder="Thank you for…">
+    <label>Sign with key</label><select id="signKey"></select>
+    <div class="btnrow"><button id="btnSend">Attest &amp; send (WebAuthn-style signature)</button>
+    <button class="ghost" id="btnDouble">⚠ Try to double-spend last send</button></div>
+    <p class="small dim">Spending consumes this window's seconds (nullifiers) and mints GC to the recipient. A second spend of the same seconds is a strand fork — rejected with proof.</p>
+  </section>
+
+  <section class="card">
+    <h2>Smart contracts — assign coins</h2>
+    <label>Contract type</label>
+    <select id="ctType"><option value="once">One-time assignment</option><option value="stream">Stream — 1 coin per minute while active</option><option value="daily">Recurring — daily at Pay Day</option></select>
+    <label>Recipient</label><select id="ctTo"></select>
+    <label>Amount (₲; for stream: 1 ₲ per minute, amount ignored)</label><input id="ctAmt" type="number" min="1" value="10">
+    <div class="btnrow"><button id="btnContract">Create contract</button></div>
+    <h3>Active contracts</h3><div id="contracts" class="small">none</div>
+  </section>
+
+  <section class="card">
+    <h2>Accountant nodes &amp; the Dyme</h2>
+    <p class="small dim">Volunteers who hold replicas, serve sync deltas and anchor checkpoints. Everyone's first <b>10 seconds</b> each day (the dyme) funds the pool, split at Pay Day pro-rata by counter-signed service.</p>
+    <div id="accountants"></div>
+    <div class="row"><span>Pool today (simulated network: 128 people × 10 s)</span><b id="poolSec">0 s</b></div>
+    <div class="btnrow"><button id="btnSync">⇅ Sync with accountant (pull missing deltas)</button></div>
+    <div class="small dim" id="syncStatus">Last checkpoint: —</div>
+  </section>
+
+  <section class="card">
+    <h2>Keys &amp; devices — the Key List</h2>
+    <div id="keyList"></div>
+    <div class="btnrow">
+      <button class="ghost" id="btnAddKey">+ Enroll another device key (e.g. Chrome)</button>
+      <button class="ghost" id="btnWebAuthn">Try a real WebAuthn passkey</button>
+    </div>
+    <p class="small dim" id="waStatus">Policy: 1-of-n device keys sign transfers · key-list changes need 2 keys or the recovery key (§9C).</p>
+  </section>
+
+  <section class="card">
+    <h2>Backup, export &amp; printed recovery</h2>
+    <div class="btnrow">
+      <button class="ghost" id="btnExport">⬇ Export backup (JSON)</button>
+      <button class="ghost" id="btnImport2">⬆ Restore backup</button>
+      <input type="file" id="fileImport2" accept="application/json" style="display:none">
+    </div>
+    <label>Recovery passphrase (for the printed QR sheet)</label><input id="recPass" type="password" placeholder="a passphrase only you know">
+    <div class="btnrow">
+      <button id="btnSheet">🖨 Make printed recovery sheet (QR)</button>
+      <button class="ghost" id="btnRecover">Recover from a sheet</button>
+    </div>
+    <div id="recoverBox" style="display:none">
+      <label>Paste recovery packet (from the sheet's printed text)</label><textarea id="recPacket"></textarea>
+      <label>Passphrase</label><input id="recPass2" type="password">
+      <button id="btnDoRecover">Run recovery rotation</button>
+      <p class="small dim">Recovery revokes all device keys and enrolls this device — after a 24 h cancel window in the full protocol (§9C). POC applies it immediately and says so in the strand.</p>
+    </div>
+    <p class="small dim">A restored backup is stale until synced: pull deltas from an accountant before spending (§8B).</p>
+  </section>
+
+  <section class="card">
+    <h2>Peer connection — WebRTC</h2>
+    <p class="small dim">Manual signaling (no server): create an offer here, paste it to a peer; or paste an offer and create an answer.</p>
+    <div class="btnrow"><button class="ghost" id="btnOffer">Create offer</button><button class="ghost" id="btnAnswer">Create answer from pasted offer</button><button class="ghost" id="btnAccept">Accept pasted answer</button><button class="ghost" id="btnPing">Send strand head to peer</button><button id="btnBroker">🤝 Brokered connect via accountant → Ada (demo)</button></div>
+    <p class="small dim">The brokered button is the accountant's other job (§8B): the accountant exchanges the signaling between you and the peer — then steps out; the transfer itself flows peer-to-peer.</p>
+    <label>Your SDP (copy this to the peer)</label><textarea id="sdpLocal" readonly></textarea>
+    <label>Peer's SDP (paste here)</label><textarea id="sdpRemote"></textarea>
+    <div class="small" id="rtcStatus">DataChannel: closed</div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <h2>Your strand — the knot, locally</h2>
+    <div class="btnrow"><button class="ghost" id="btnVerify">✓ Verify strand (hashes + signatures)</button><span class="small dim" id="verifyOut"></span></div>
+    <div class="log" id="strandLog"></div>
+  </section>
+</main>
+
+<div id="sheet">
+  <h2>₲ Gcoin Recovery Sheet — keep private, store like cash</h2>
+  <p id="sheetMeta"></p>
+  <canvas id="sheetQr" width="240" height="240"></canvas>
+  <p class="small">Scan this QR and enter your passphrase to recover your wallet on a new device. The QR holds your seed <b>encrypted</b> under that passphrase — the paper alone cannot spend. Never photograph or screenshot this sheet.</p>
+  <p class="mono" id="sheetText"></p>
+  <p class="small">Network genesis attested by did:web:monytyme.com · Gcoin POC</p>
+  <div class="btnrow"><button onclick="window.print()">Print</button> <button class="ghost" onclick="document.getElementById('sheet').style.display='none'">Close</button></div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script type="module">
+/* The qrcode package ships no UMD browser bundle (the old /build/qrcode.min.js URL 404s);
+   jsdelivr's +esm endpoint serves the same library (v1.5.3) as an ES module with the
+   identical QRCode.toCanvas API used by makeSheet() below. */
+import QRCode from 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/+esm';
+window.QRCode = QRCode;
+</script>
+<script>
+'use strict';
+/* ============ Gcoin POC wallet — spec: GCOIN_MVP_POC_SPEC.md (§3, §4, §6–§9C) ============ */
+const $=id=>document.getElementById(id);
+const enc=new TextEncoder(), dec=new TextDecoder();
+const DAY_SEC=86400, DYME_SEC=10, NETWORK_GENESIS={domain:'monytyme.com',did:'did:web:monytyme.com',statement:'Gcoin genesis attested by the controller of monytyme.com'};
+let S=null;           // wallet state (persisted)
+let busy=false;
+
+/* ---------- canonical JSON + hashing + signing ---------- */
+function canon(o){ if(o===null||typeof o!=='object') return JSON.stringify(o); if(Array.isArray(o)) return '['+o.map(canon).join(',')+']'; return '{'+Object.keys(o).sort().map(k=>JSON.stringify(k)+':'+canon(o[k])).join(',')+'}'; }
+async function sha256hex(s){ const b=await crypto.subtle.digest('SHA-256',enc.encode(s)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+const b64=a=>btoa(String.fromCharCode(...new Uint8Array(a))); const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+async function importKey(jwk,usages){ return crypto.subtle.importKey('jwk',jwk,{name:'ECDSA',namedCurve:'P-256'},true,usages); }
+async function signWith(jwkPriv,data){ const k=await importKey(jwkPriv,['sign']); const sig=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},k,enc.encode(data)); return b64(sig); }
+async function verifyWith(jwkPub,data,sigB64){ try{ const k=await importKey(jwkPub,['verify']); return await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},k,unb64(sigB64),enc.encode(data)); }catch(e){ return false; } }
+async function newDeviceKey(label){ const kp=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']); const pub=await crypto.subtle.exportKey('jwk',kp.publicKey), priv=await crypto.subtle.exportKey('jwk',kp.privateKey); return {id:'key-'+Math.random().toString(36).slice(2,9),label,kind:'device (POC stand-in for WebAuthn passkey)',pub,priv,status:'active'}; }
+
+/* ---------- storage: IndexedDB (+ OPFS probe) ---------- */
+const idb={ db:null, open(){ return new Promise((res,rej)=>{ const r=indexedDB.open('gcoin-poc',1); r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>{idb.db=r.result;res()}; r.onerror=()=>rej(r.error); }); },
+  get(k){ return new Promise((res,rej)=>{ const q=idb.db.transaction('kv').objectStore('kv').get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); },
+  set(k,v){ return new Promise((res,rej)=>{ const q=idb.db.transaction('kv','readwrite').objectStore('kv').put(v,k); q.onsuccess=()=>res(); q.onerror=()=>rej(q.error); }); } };
+let opfsOK=false; async function probeOPFS(){ try{ if(navigator.storage&&navigator.storage.getDirectory){ const root=await navigator.storage.getDirectory(); const fh=await root.getFileHandle('gcoin-strand.json',{create:true}); const w=await fh.createWritable(); await w.write(JSON.stringify({probe:true,at:Date.now()})); await w.close(); opfsOK=true; } }catch(e){ opfsOK=false; } }
+async function opfsWriteStrand(){ if(!opfsOK) return; try{ const root=await navigator.storage.getDirectory(); const fh=await root.getFileHandle('gcoin-strand.json',{create:true}); const w=await fh.createWritable(); await w.write(JSON.stringify(S.strand)); await w.close(); }catch(e){} }
+async function save(){ if(S) await idb.set('wallet',S); }
+
+/* ---------- toast / logging ---------- */
+let toastTimer=null; function toast(msg,ms=3400){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.style.display='none',ms); }
+
+/* ---------- time: 04:00-anchored window, virtual clock for demo ---------- */
+function vnow(){ return Date.now()+(S?S.vOffsetSec*1000:0); }
+function windowStartFor(t){ const d=new Date(t); d.setHours(4,0,0,0); if(t<d.getTime()) d.setDate(d.getDate()-1); return d.getTime(); }
+function fmtCoins(sec){ const c=Math.floor(sec/60), s=Math.floor(sec%60); return '₲'+c.toLocaleString()+(s?(' + '+s+'s'):''); }
+function fmtDur(sec){ sec=Math.max(0,Math.floor(sec)); const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60; return (h?h+'h ':'')+(m?m+'m ':'')+s+'s'; }
+
+/* ---------- derived balances from the strand ---------- */
+function derive(){
+  const ws=windowStartFor(vnow()), wk=new Date(ws).toISOString();
+  const elapsed=Math.min(DAY_SEC,Math.floor((vnow()-ws)/1000));
+  let spentWin=0, gc=0, gcInToday=0, gcOutToday=0, committed=0;
+  const spentRanges=[]; // {from,to,window}
+  for(const ev of S.strand){ const p=ev.payload||{};
+    if(ev.type==='mm.spend'&&p.window===wk){ spentWin+=p.sec; spentRanges.push({from:p.fromSec,to:p.toSec}); }
+    if(ev.type==='gc.mint'){ gc+=p.sec; if(p.window===wk) gcInToday+=p.sec; }
+    if(ev.type==='gc.send'){ gc-=p.sec; if(p.window===wk) gcOutToday+=p.sec; }
+    if(ev.type==='gc.receive'){ gc+=p.sec; if(p.window===wk) gcInToday+=p.sec; }
+    if(ev.type==='dyme.pay'){ /* pool pays accountants; not from user GC */ }
+  }
+  for(const c of S.contracts) if(c.active&&c.type==='stream') committed+=60; // next minute reserved
+  const dyme=Math.min(DYME_SEC,elapsed);
+  return {ws,wk,elapsed,spentWin,gc,gcInToday,gcOutToday,committed,dyme,spentRanges,
+    spendable:Math.max(0,elapsed-dyme-spentWin-committed)};
+}
+function rangeSpent(ranges,from,to){ return ranges.some(r=>from<r.to&&to>r.from); }
+
+/* ---------- strand: append signed, hash-linked events ---------- */
+function activeKey(){ return S.keys.find(k=>k.id===S.activeKeyId&&k.priv)||S.keys.find(k=>k.priv); }
+function lastHash(){ return S.strand.length?S.strand[S.strand.length-1].hash:null; }
+async function appendEvent(type,payload,key){
+  key=key||activeKey(); if(!key) throw new Error('no signing key');
+  const prev=lastHash()||await sha256hex(canon(NETWORK_GENESIS));
+  const core={seq:S.strand.length,ts:new Date(vnow()).toISOString(),type,payload,prev};
+  const hash=await sha256hex(canon(core));
+  const sig=await signWith(key.priv,hash);
+  const ev={...core,hash,sig,by:key.id};
+  S.strand.push(ev); await save(); opfsWriteStrand(); return ev;
+}
+async function verifyStrand(){
+  let prev=await sha256hex(canon(NETWORK_GENESIS)), ok=0;
+  for(const ev of S.strand){ const {hash,sig,by,...core}=ev;
+    if(core.prev!==prev) return {ok:false,at:ev.seq,why:'prev-hash link broken'};
+    const h=await sha256hex(canon(core)); if(h!==hash) return {ok:false,at:ev.seq,why:'hash mismatch'};
+    const key=S.keys.find(k=>k.id===by); if(key){ if(!await verifyWith(key.pub,hash,sig)) return {ok:false,at:ev.seq,why:'bad signature'}; }
+    prev=hash; ok++; }
+  return {ok:true,count:ok,head:prev};
+}
+
+/* ---------- demo universe: contacts + accountants ---------- */
+function seedUniverse(){ return {
+  contacts:[ {id:'ada',name:'Ada Lovelace',gcSec:0},{id:'grace',name:'Grace Hopper',gcSec:0},{id:'alan',name:'Alan Turing',gcSec:0} ],
+  accountants:[ {id:'acct-monytyme',name:'MonyTyme Witness',service:50,earnedSec:0},{id:'acct-ada',name:'Ada Node',service:30,earnedSec:0},{id:'acct-relay',name:'Community Relay',service:20,earnedSec:0} ] }; }
+
+/* ---------- wallet creation ---------- */
+function readFileAsDataURL(f){ return new Promise(res=>{ if(!f) return res(''); const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(f); }); }
+async function createWallet(){
+  const name=$('cName').value.trim()||'Anonymous'; const email=$('cEmail').value.trim();
+  const photo=await readFileAsDataURL($('cPhoto').files[0]);
+  const key=await newDeviceKey('Safari/iCloud passkey (this device)');
+  const did='did:gcoin:'+(await sha256hex(key.pub.x+key.pub.y)).slice(0,24);
+  const uni=seedUniverse();
+  S={ name,email,photo,did, emailHash:await sha256hex(email||'none'), photoHash:await sha256hex(photo||'none'),
+      keys:[key], activeKeyId:key.id, strand:[], contracts:[], contacts:uni.contacts, accountants:uni.accountants,
+      vOffsetSec:0, windowKeySeen:null, lastCheckpoint:null,
+      pendingIncoming:[{from:'Ada Lovelace',sec:12*60,note:'for the engine sketches'}] };
+  await appendEvent('wallet.create',{did,name,emailHash:S.emailHash,photoHash:S.photoHash,networkGenesis:NETWORK_GENESIS,keyList:[{id:key.id,label:key.label}]});
+  S.windowKeySeen=derive().wk; await save();
+  $('createWrap').style.display='none'; $('app').style.display='grid';
+  renderStatic(); renderClocks();
+  toast('Wallet created. Your strand begins — genesis attested by monytyme.com.');
+}
+
+/* ---------- Pay Day: close the window, pay the dyme, run daily contracts ---------- */
+async function paydayClose(prevWk){
+  if(busy) return; busy=true;
+  try{
+    let spentPrev=0; for(const ev of S.strand){ const p=ev.payload||{}; if(ev.type==='mm.spend'&&p.window===prevWk) spentPrev+=p.sec; }
+    const burned=Math.max(0,DAY_SEC-DYME_SEC-spentPrev);
+    await appendEvent('payday.close',{window:prevWk,spentSec:spentPrev,dymeSec:DYME_SEC,burnedSec:burned,note:'Unspent accrual written off; cash book carries forward.'});
+    const totalSvc=S.accountants.reduce((a,x)=>a+x.service,0); let paid=0;
+    for(let i=0;i<S.accountants.length;i++){ const a=S.accountants[i]; let sec=Math.round(DYME_SEC*a.service/totalSvc); if(i===S.accountants.length-1) sec=DYME_SEC-paid; paid+=sec; a.earnedSec=(a.earnedSec||0)+sec;
+      await appendEvent('dyme.pay',{to:a.id,toName:a.name,sec,basis:'pro-rata service '+a.service+'/'+totalSvc}); }
+    toast('🌅 Pay Day! Yesterday closed: '+fmtCoins(burned)+' burned unspent, dyme paid to accountants.');
+    for(const c of S.contracts) if(c.active&&c.type==='daily'){ await executeSpend(c.to,c.amount,'daily-contract',{contract:c.id}).catch(()=>{}); }
+    S.windowKeySeen=derive().wk; await save(); renderStatic();
+  } finally{ busy=false; }
+}
+
+/* ---------- spending (MM from accrual, fallback: GC from cash book) ---------- */
+function contactById(id){ return S.contacts.find(c=>c.id===id); }
+async function executeSpend(toId,coins,source,extra){
+  const sec=Math.round(coins*60); if(sec<=0) throw new Error('amount must be positive');
+  const d=derive(); const to=contactById(toId); if(!to) throw new Error('unknown recipient');
+  const level=$('sendLevel')?$('sendLevel').value:'L0'; const note=(level==='L3'&&$('sendNote'))?$('sendNote').value:'';
+  const base={to:toId,toName:to.name,sec,level,note,assert:{by:to.name,mode:'simulated demo-peer assertion'},...(extra||{})};
+  if(source!=='gc'&&sec<=d.spendable){
+    const fromSec=DYME_SEC+d.spentWin; const payload={...base,window:d.wk,fromSec,toSec:fromSec+sec,kind:'mm.spend→mint'};
+    const ev=await appendEvent('mm.spend',payload); to.gcSec+=sec; await save(); return ev;
+  }
+  if(sec<=d.gc){ const ev=await appendEvent('gc.send',{...base,kind:'gc.transfer'}); to.gcSec+=sec; await save(); return ev; }
+  throw new Error('insufficient spendable minutes ('+fmtCoins(d.spendable)+') and GC ('+fmtCoins(d.gc)+')');
+}
+
+/* ---------- rendering ---------- */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function renderClocks(){
+  if(!S) return; const d=derive();
+  $('clockBox').innerHTML='local '+new Date().toLocaleTimeString()+' · virtual '+new Date(vnow()).toLocaleTimeString()+'<br>Pay Day in '+fmtDur((d.ws+DAY_SEC*1000-vnow())/1000);
+  $('accruedCoins').textContent=Math.floor(d.elapsed/60).toLocaleString();
+  $('accrBar').style.width=(d.elapsed/DAY_SEC*100)+'%';
+  $('winLbl').textContent=new Date(d.ws).toLocaleDateString()+' 04:00 → +24h';
+  $('accrSec').textContent=fmtCoins(d.elapsed)+' ('+d.elapsed.toLocaleString()+' s)';
+  $('dymeSec').textContent=d.dyme+' s → accountant pool';
+  $('commitSec').textContent=fmtCoins(d.committed);
+  $('spentSec').textContent=fmtCoins(d.spentWin);
+  $('spendSec').textContent=fmtCoins(d.spendable);
+  $('gcCoins').textContent=Math.floor(d.gc/60).toLocaleString();
+  $('gcSec').textContent=fmtCoins(d.gc)+' ('+Math.floor(d.gc).toLocaleString()+' s)';
+  $('gcInToday').textContent=fmtCoins(d.gcInToday); $('gcOutToday').textContent=fmtCoins(d.gcOutToday);
+  $('poolSec').textContent=(128*DYME_SEC).toLocaleString()+' s';
+}
+function renderStatic(){
+  if(!S) return;
+  $('who').innerHTML='<b style="color:var(--txt)">'+esc(S.name)+'</b> · '+esc(S.did)+'<br>storage: IndexedDB ✓ · OPFS '+(opfsOK?'✓ (strand mirrored)':'unavailable in this browser')+' · strand head '+(lastHash()?lastHash().slice(0,16)+'…':'—');
+  if(S.photo){ $('avatar').src=S.photo; $('avatar').style.display='block'; }
+  $('contacts').innerHTML=S.contacts.map(c=>'<div class="row"><span>'+esc(c.name)+'</span><b>'+fmtCoins(c.gcSec)+' GC held</b></div>').join('');
+  const totSvc=S.accountants.reduce((a,x)=>a+x.service,0);
+  $('accountants').innerHTML=S.accountants.map(a=>'<div class="row"><span>'+esc(a.name)+' <span class="dim small">broker · replica · deltas · anchors</span></span><b>'+Math.round(a.service/totSvc*100)+'% of dyme · earned '+fmtCoins(a.earnedSec||0)+'</b></div>').join('');
+  $('syncStatus').textContent='Last checkpoint: '+(S.lastCheckpoint?S.lastCheckpoint.root.slice(0,20)+'… ('+S.lastCheckpoint.count+' events)':'—')+' · pending incoming deltas: '+(S.pendingIncoming?S.pendingIncoming.length:0);
+  const opts=S.contacts.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('');
+  $('sendTo').innerHTML=opts; $('ctTo').innerHTML=opts;
+  $('signKey').innerHTML=S.keys.filter(k=>k.priv&&k.status==='active').map(k=>'<option value="'+k.id+'"'+(k.id===S.activeKeyId?' selected':'')+'>'+esc(k.label)+'</option>').join('');
+  $('keyList').innerHTML=S.keys.map(k=>'<div class="row"><span><span class="pill">'+esc(k.status)+'</span> '+esc(k.label)+'<br><span class="did">'+esc(k.id)+' · '+esc(k.kind)+'</span></span>'+(k.status==='active'&&S.keys.filter(x=>x.status==="active").length>1?'<button class="danger" data-revoke="'+k.id+'">Revoke</button>':'')+'</div>').join('');
+  $('contracts').innerHTML=S.contracts.length?S.contracts.map(c=>'<div class="row"><span><span class="pill">'+esc(c.type)+'</span> → '+esc((contactById(c.to)||{}).name||c.to)+' · '+(c.type==='stream'?'1 coin/min':c.amount+' coins')+'</span>'+(c.active?'<button class="ghost" data-stop="'+c.id+'">Stop</button>':'<span class="dim">ended</span>')+'</div>').join(''):'none';
+  const lines=[...S.strand].slice(-42).reverse().map(ev=>{ const p=ev.payload||{}; let det='';
+    if(ev.type==='mm.spend') det=' '+fmtCoins(p.sec)+' → '+esc(p.toName)+' ['+p.fromSec+'–'+p.toSec+') '+esc(p.level||'');
+    if(ev.type==='gc.send') det=' '+fmtCoins(p.sec)+' GC → '+esc(p.toName);
+    if(ev.type==='gc.receive') det=' +'+fmtCoins(p.sec)+' from '+esc(p.from);
+    if(ev.type==='payday.close') det=' burned '+fmtCoins(p.burnedSec);
+    if(ev.type==='dyme.pay') det=' '+p.sec+'s → '+esc(p.toName);
+    return '<div>#'+ev.seq+' <b>'+esc(ev.type)+'</b>'+det+'<br><span class="dim">hash '+ev.hash.slice(0,20)+'… · prev '+String(ev.prev).slice(0,12)+'… · signed by '+esc(ev.by)+'</span></div>'; }).join('');
+  $('strandLog').innerHTML=(window._rejected?'<div class="red">'+esc(window._rejected)+'</div>':'')+lines;
+  renderClocks();
+}
+/* ---------- actions: send / double-spend / contracts ---------- */
+async function onSend(){
+  if(busy) return; busy=true;
+  try{ const amt=parseFloat($('sendAmt').value); const ev=await executeSpend($('sendTo').value,amt,'auto');
+    toast('✓ Attested & sent '+fmtCoins(ev.payload.sec)+' → '+ev.payload.toName+'. Recipient asserted (simulated); affirmation lands at next accountant checkpoint.');
+    renderStatic();
+  }catch(e){ toast('⚠ '+e.message); } finally{ busy=false; }
+}
+async function onDouble(){
+  const d=derive(); const last=[...S.strand].reverse().find(e=>e.type==='mm.spend'&&e.payload.window===d.wk);
+  if(!last){ toast('No spend yet this window to replay.'); return; }
+  const p=last.payload;
+  if(rangeSpent(d.spentRanges,p.fromSec,p.toSec)){
+    window._rejected='✗ REJECTED double-spend: replay of event #'+last.seq+' reuses seconds ['+p.fromSec+'–'+p.toSec+') of window '+p.window.slice(0,10)+'. The original spend and this attempt are both signed — the fork is self-proving. Nothing was appended.';
+    renderStatic(); toast('✗ Double-spend rejected — see strand log.');
+  }
+}
+async function onContract(){
+  if(busy) return; busy=true;
+  try{ const type=$('ctType').value, to=$('ctTo').value, amount=Math.max(1,parseFloat($('ctAmt').value)||1);
+    const c={id:'ct-'+Math.random().toString(36).slice(2,8),type,to,amount,active:true,lastMin:-1};
+    S.contracts.push(c);
+    await appendEvent('contract.create',{contract:c.id,type,to,amount});
+    if(type==='once'){ await executeSpend(to,amount,'auto',{contract:c.id}); c.active=false; }
+    if(type==='daily'){ toast('Recurring contract created — executes at each Pay Day.'); }
+    if(type==='stream'){ toast('Stream started — 1 coin per minute while active.'); }
+    await save(); renderStatic();
+  }catch(e){ toast('⚠ '+e.message); } finally{ busy=false; }
+}
+
+/* ---------- accountant sync: push backup + pull deltas + checkpoint (affirm) ---------- */
+function acctStore(){ try{ return JSON.parse(localStorage.getItem('gcoin-acct:'+S.did))||null; }catch(e){ return null; } }
+function acctStoreSave(st){ localStorage.setItem('gcoin-acct:'+S.did,JSON.stringify(st)); }
+async function onSync(){
+  if(busy) return; busy=true;
+  try{
+    let st=acctStore(); if(!st){ st={backedHashes:[],pending:S.pendingIncoming.splice(0)}; }
+    const myHashes=S.strand.map(e=>e.hash); const newBacked=myHashes.filter(h=>!st.backedHashes.includes(h));
+    st.backedHashes=[...new Set([...st.backedHashes,...myHashes])];
+    const deltas=st.pending.splice(0); let applied=0;
+    for(const inc of deltas){ await appendEvent('gc.receive',{from:inc.from,sec:inc.sec,note:inc.note||'',via:'accountant delta sync'}); applied++; }
+    const root=await sha256hex(myHashes.join('|'));
+    S.lastCheckpoint={root,count:myHashes.length,at:new Date(vnow()).toISOString(),by:'acct-monytyme'};
+    await appendEvent('checkpoint',{root,count:myHashes.length,by:'MonyTyme Witness (accountant)',affirms:'all strand events through this point'});
+    acctStoreSave(st); await save(); renderStatic();
+    toast('⇅ Sync complete: backed up '+newBacked.length+' events, applied '+applied+' incoming delta(s), checkpoint affirmed by accountant.');
+  }catch(e){ toast('⚠ sync failed: '+e.message); } finally{ busy=false; }
+}
+
+/* ---------- keys: enroll / revoke / WebAuthn ---------- */
+async function onAddKey(){
+  const labels=['Chrome on Mac','Safari on iPhone (2nd key)','Backup browser']; const n=S.keys.length;
+  const key=await newDeviceKey(labels[Math.min(n-1,labels.length-1)]+' · device key '+(n+1));
+  S.keys.push(key);
+  await appendEvent('keylist.add',{key:{id:key.id,label:key.label},policy:'1-of-n sign · 2-of-n for key changes (§9C)'});
+  await save(); renderStatic(); toast('Device key enrolled: '+key.label);
+}
+async function onWebAuthn(){
+  const st=$('waStatus');
+  if(!window.PublicKeyCredential){ st.textContent='WebAuthn not available in this browser/context.'; return; }
+  try{
+    const cred=await navigator.credentials.create({publicKey:{ challenge:crypto.getRandomValues(new Uint8Array(32)),
+      rp:{name:'Gcoin POC'}, user:{id:enc.encode(S.did.slice(0,16)),name:S.email||'gcoin-user',displayName:S.name},
+      pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection:{userVerification:'preferred'}, timeout:60000 }});
+    const credId=b64(cred.rawId);
+    S.keys.push({id:'wa-'+credId.slice(0,10),label:'WebAuthn passkey ('+(cred.authenticatorAttachment||'platform')+')',kind:'webauthn',credId,status:'active',pub:null,priv:null});
+    await appendEvent('keylist.add',{key:{id:'wa-'+credId.slice(0,10),kind:'webauthn'},note:'real passkey registered; POC strand signing still uses the in-browser device key'});
+    await save(); renderStatic(); st.textContent='✓ Real WebAuthn passkey registered and added to the Key List.';
+  }catch(e){ st.textContent='WebAuthn registration did not complete ('+e.name+'). It needs https or localhost, a user gesture, and a platform authenticator. The POC device key still signs.'; }
+}
+
+/* ---------- export / import ---------- */
+function download(name,text){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:'application/json'})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000); }
+function onExport(){ download('gcoin-backup-'+S.did.slice(-8)+'.json',JSON.stringify(S,null,2)); toast('Backup exported. Remember: a restored backup is stale until synced with an accountant.'); }
+function onImportFile(file){ const r=new FileReader(); r.onload=async()=>{ try{ const obj=JSON.parse(r.result); if(!obj.did||!obj.strand) throw new Error('not a Gcoin backup'); S=obj; await save(); $('createWrap').style.display='none'; $('app').style.display='grid'; renderStatic(); toast('Backup restored for '+S.name+'. Now sync with an accountant to pull missing deltas before spending.'); }catch(e){ toast('⚠ import failed: '+e.message); } }; r.readAsText(file); }
+
+/* ---------- printed QR recovery sheet ---------- */
+async function makeSheet(){
+  const pass=$('recPass').value; if(!pass||pass.length<4){ toast('Set a recovery passphrase (4+ characters) first.'); return; }
+  const key=S.keys.find(k=>k.priv); if(!key){ toast('No device key to back up.'); return; }
+  const salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
+  const km=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveKey']);
+  const ak=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:150000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['encrypt']);
+  const plain=JSON.stringify({did:S.did,name:S.name,jwk:{kty:key.pub.kty,crv:key.pub.crv,x:key.pub.x,y:key.pub.y,d:key.priv.d}});
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},ak,enc.encode(plain));
+  const packet=btoa(JSON.stringify({v:1,salt:b64(salt),iv:b64(iv),ct:b64(ct)}));
+  $('sheetMeta').innerHTML='Wallet of <b>'+esc(S.name)+'</b> · '+esc(S.did)+'<br>Fingerprint: '+(await sha256hex(S.did)).slice(0,16)+' · Made '+new Date().toLocaleDateString()+' · Key: '+esc(key.label);
+  $('sheetText').textContent=packet;
+  $('sheet').style.display='block';
+  if(window.QRCode){ QRCode.toCanvas($('sheetQr'),packet,{width:240,errorCorrectionLevel:'M'},e=>{ if(e) $('sheetText').textContent='QR render failed ('+e.message+') — use the printed text below.\n'+packet; }); }
+  $('sheet').scrollIntoView({behavior:'smooth'});
+}
+async function doRecover(){
+  try{
+    const pkt=JSON.parse(atob($('recPacket').value.trim())); const pass=$('recPass2').value;
+    const km=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveKey']);
+    const ak=await crypto.subtle.deriveKey({name:'PBKDF2',salt:unb64(pkt.salt),iterations:150000,hash:'SHA-256'},km,{name:'AES-GCM',length:256},false,['decrypt']);
+    const plain=dec.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(pkt.iv)},ak,unb64(pkt.ct)));
+    const rec=JSON.parse(plain); const jwk=rec.jwk;
+    const key={id:'key-rec-'+Math.random().toString(36).slice(2,8),label:'Recovered device key (this device)',kind:'device (recovered)',pub:{kty:jwk.kty,crv:jwk.crv,x:jwk.x,y:jwk.y},priv:{kty:jwk.kty,crv:jwk.crv,x:jwk.x,y:jwk.y,d:jwk.d},status:'active'};
+    if(!S){ const uni=seedUniverse(); S={name:rec.name||'Recovered',email:'',photo:'',did:rec.did,emailHash:'',photoHash:'',keys:[key],activeKeyId:key.id,strand:[],contracts:[],contacts:uni.contacts,accountants:uni.accountants,vOffsetSec:0,windowKeySeen:null,lastCheckpoint:null,pendingIncoming:[]};
+      await appendEvent('recovery.rotation',{did:rec.did,note:'Wallet recovered from printed sheet. Sync with an accountant to restore strand history deltas.',pocNote:'24h cancel window waived in POC'});
+      $('createWrap').style.display='none'; $('app').style.display='grid';
+    } else {
+      for(const k of S.keys) if(k.status==='active') k.status='revoked';
+      S.keys.push(key); S.activeKeyId=key.id;
+      await appendEvent('recovery.rotation',{note:'All prior device keys revoked; recovered key enrolled.',pocNote:'24h cancel window waived in POC'});
+    }
+    S.windowKeySeen=derive().wk; await save(); renderStatic();
+    toast('✓ Recovery complete. This device can sign again — sync with an accountant to pull your missing deltas.');
+  }catch(e){ toast('⚠ recovery failed: wrong passphrase or corrupt packet.'); }
+}
+
+/* ---------- verify ---------- */
+async function onVerify(){ const r=await verifyStrand(); $('verifyOut').textContent=r.ok?('✓ strand verified: '+r.count+' events, hashes + signatures valid. Head '+r.head.slice(0,16)+'…'):('✗ FAILED at event #'+r.at+': '+r.why); }
+/* ---------- WebRTC: manual signaling + accountant-brokered demo ---------- */
+let mpc=null, mdc=null, bpcMe=null, bpcAda=null, bdc=null, adaDc=null;
+function rtcSet(t){ $('rtcStatus').textContent=t; }
+function waitIce(pc){ return new Promise(res=>{ if(pc.iceGatheringState==='complete') return res(); pc.onicegatheringstatechange=()=>{ if(pc.iceGatheringState==='complete') res(); }; }); }
+function wireDc(dc,label){ dc.onopen=()=>rtcSet('DataChannel open ('+label+')'); dc.onclose=()=>rtcSet('DataChannel closed'); dc.onmessage=e=>{ rtcSet('Peer message: '+String(e.data).slice(0,140)); toast('📩 Peer: '+String(e.data).slice(0,120)); }; }
+async function onOffer(){ mpc=new RTCPeerConnection(); mdc=mpc.createDataChannel('gcoin'); wireDc(mdc,'manual'); await mpc.setLocalDescription(await mpc.createOffer()); await waitIce(mpc); $('sdpLocal').value=JSON.stringify(mpc.localDescription); rtcSet('Offer ready — copy it to your peer.'); }
+async function onAnswer(){ const offer=JSON.parse($('sdpRemote').value); mpc=new RTCPeerConnection(); mpc.ondatachannel=e=>{ mdc=e.channel; wireDc(mdc,'manual'); }; await mpc.setRemoteDescription(offer); await mpc.setLocalDescription(await mpc.createAnswer()); await waitIce(mpc); $('sdpLocal').value=JSON.stringify(mpc.localDescription); rtcSet('Answer ready — copy it back to the peer.'); }
+async function onAccept(){ await mpc.setRemoteDescription(JSON.parse($('sdpRemote').value)); rtcSet('Answer accepted — channel should open.'); }
+function openDc(){ return (bdc&&bdc.readyState==='open')?bdc:((mdc&&mdc.readyState==='open')?mdc:null); }
+async function onPing(){ const dc=openDc(); if(!dc){ toast('No open DataChannel yet — use manual signaling or the brokered connect.'); return; } dc.send(JSON.stringify({type:'strand-head',did:S.did,head:lastHash(),events:S.strand.length})); rtcSet('Sent strand head to peer.'); }
+async function onBroker(){
+  rtcSet('Broker: MonyTyme Witness is exchanging signaling between you and Ada…');
+  bpcMe=new RTCPeerConnection(); bpcAda=new RTCPeerConnection();
+  bpcMe.onicecandidate=e=>{ if(e.candidate) bpcAda.addIceCandidate(e.candidate).catch(()=>{}); };
+  bpcAda.onicecandidate=e=>{ if(e.candidate) bpcMe.addIceCandidate(e.candidate).catch(()=>{}); };
+  bdc=bpcMe.createDataChannel('gcoin'); wireDc(bdc,'brokered');
+  bpcAda.ondatachannel=e=>{ adaDc=e.channel; adaDc.onmessage=ev=>{ try{ const m=JSON.parse(ev.data); if(m.type==='transfer'){ adaDc.send(JSON.stringify({type:'assert',of:m.hash,by:'Ada Lovelace',note:'asserted over brokered WebRTC channel'})); } if(m.type==='strand-head'){ adaDc.send(JSON.stringify({type:'ack',note:'Ada received your strand head ✓'})); } }catch(_){/*noop*/} }; };
+  const offer=await bpcMe.createOffer(); await bpcMe.setLocalDescription(offer);
+  await bpcAda.setRemoteDescription(offer);              /* ← the broker carries this */
+  const answer=await bpcAda.createAnswer(); await bpcAda.setLocalDescription(answer);
+  await bpcMe.setRemoteDescription(answer);               /* ← and this; then it steps out */
+  rtcSet('Brokered introduction complete — direct peer channel opening (Ada, simulated remote peer in-page).');
+  toast('🤝 Accountant brokered the introduction. The channel is now purely peer-to-peer.');
+}
+
+/* ---------- tick: virtual clock, Pay Day rollover, streams ---------- */
+let tickN=0;
+async function tick(){
+  if(!S||busy) return; tickN++;
+  if($('demoSpeed').checked){ S.vOffsetSec+=59; if(tickN%10===0) save(); }
+  const d=derive();
+  if(S.windowKeySeen&&S.windowKeySeen!==d.wk){ await paydayClose(S.windowKeySeen); return; }
+  // streams: one coin per virtual minute
+  const minIdx=Math.floor(d.elapsed/60);
+  for(const c of S.contracts){ if(c.active&&c.type==='stream'&&c.lastMin<minIdx&&minIdx>0){ c.lastMin=minIdx;
+    try{ await executeSpend(c.to,1,'auto',{contract:c.id,stream:true}); }catch(e){ c.active=false; toast('Stream ended: '+e.message); }
+    await save(); renderStatic(); return; } }
+  renderClocks();
+}
+
+/* ---------- bindings + boot ---------- */
+function bind(){
+  $('btnCreate').onclick=()=>createWallet().catch(e=>toast('⚠ '+e.message));
+  $('btnImport1').onclick=()=>$('fileImport1').click(); $('btnImport2').onclick=()=>$('fileImport2').click();
+  $('fileImport1').onchange=e=>{ if(e.target.files[0]) onImportFile(e.target.files[0]); };
+  $('fileImport2').onchange=e=>{ if(e.target.files[0]) onImportFile(e.target.files[0]); };
+  $('btnSend').onclick=onSend; $('btnDouble').onclick=onDouble; $('btnContract').onclick=onContract;
+  $('btnSync').onclick=onSync; $('btnAddKey').onclick=()=>onAddKey().catch(e=>toast('⚠ '+e.message));
+  $('btnWebAuthn').onclick=onWebAuthn; $('btnExport').onclick=onExport;
+  $('btnSheet').onclick=()=>makeSheet().catch(e=>toast('⚠ '+e.message));
+  $('btnRecover').onclick=()=>{ $('recoverBox').style.display=$('recoverBox').style.display==='none'?'block':'none'; };
+  $('btnDoRecover').onclick=()=>doRecover();
+  $('btnVerify').onclick=onVerify;
+  $('btnOffer').onclick=()=>onOffer().catch(e=>toast('⚠ '+e.message));
+  $('btnAnswer').onclick=()=>onAnswer().catch(e=>toast('⚠ '+e.message));
+  $('btnAccept').onclick=()=>onAccept().catch(e=>toast('⚠ '+e.message));
+  $('btnPing').onclick=onPing; $('btnBroker').onclick=()=>onBroker().catch(e=>toast('⚠ '+e.message));
+  $('signKey').onchange=e=>{ S.activeKeyId=e.target.value; save(); };
+  document.addEventListener('click',async e=>{
+    const rv=e.target.getAttribute&&e.target.getAttribute('data-revoke');
+    const st=e.target.getAttribute&&e.target.getAttribute('data-stop');
+    if(rv){ const k=S.keys.find(x=>x.id===rv); if(k){ k.status='revoked'; if(S.activeKeyId===rv){ const a=S.keys.find(x=>x.priv&&x.status==='active'); if(a) S.activeKeyId=a.id; } await appendEvent('keylist.revoke',{key:rv}); await save(); renderStatic(); toast('Key revoked: '+k.label); } }
+    if(st){ const c=S.contracts.find(x=>x.id===st); if(c){ c.active=false; await appendEvent('contract.cancel',{contract:st}); await save(); renderStatic(); toast('Contract stopped.'); } }
+  });
+}
+(async function boot(){
+  bind();
+  await idb.open(); await probeOPFS();
+  S=await idb.get('wallet');
+  if(S){ if(!S.pendingIncoming) S.pendingIncoming=[]; $('createWrap').style.display='none'; $('app').style.display='grid'; renderStatic(); }
+  else $('createWrap').style.display='block';
+  setInterval(()=>{ tick().catch(()=>{}); },1000);
+})();
+</script>
+</body>
+</html>
+</body>
+</html>
