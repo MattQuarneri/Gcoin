@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reflective Code Reader — Prototype 1</title>
+<style>
+  :root{ --ink:#1a2233; --mut:#5b6b82; --teal:#0e7c86; --amber:#d9930d; --violet:#7c5cd6; --red:#d64545; --card:#ffffff; --bg:#eef2f7; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  header{ padding:18px 22px 6px; }
+  h1{ margin:0; font-size:22px; }
+  header p{ margin:6px 0 0; color:var(--mut); max-width:860px; font-size:14px; line-height:1.45; }
+  .bar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:12px 22px 4px; }
+  button{ font:inherit; font-size:13.5px; padding:7px 14px; border-radius:999px; border:1px solid #c4cfdd; background:#fff; cursor:pointer; }
+  button:hover{ border-color:var(--teal); }
+  button.primary{ background:var(--teal); color:#fff; border-color:var(--teal); font-weight:600; }
+  button.on{ background:#ffe9bd; border-color:var(--amber); }
+  .hint{ font-size:12.5px; color:var(--mut); }
+  main{ display:flex; gap:14px; padding:10px 22px; align-items:flex-start; flex-wrap:wrap; }
+  .stageWrap{ flex:1 1 640px; background:var(--card); border-radius:16px; box-shadow:0 2px 14px rgba(20,35,60,.08); padding:8px; position:relative; }
+  svg{ width:100%; height:auto; display:block; }
+  aside{ flex:0 1 330px; display:flex; flex-direction:column; gap:12px; min-width:280px; }
+  .bubble{ background:#fff8e6; border:1.5px solid var(--amber); border-radius:14px; padding:12px 14px; position:relative; }
+  .bubble h3{ margin:0 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:#9a6a00; }
+  .bubble p{ margin:0; font-size:14.5px; line-height:1.5; }
+  .bubble.idle{ background:#f4f7fb; border-color:#d4dde8; }
+  .bubble.idle h3{ color:var(--mut); }
+  .log{ background:var(--card); border-radius:14px; box-shadow:0 2px 14px rgba(20,35,60,.08); padding:12px 16px; }
+  .log h3{ margin:2px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); }
+  .log ol{ margin:0; padding-left:20px; }
+  .log li{ font-size:13.5px; line-height:1.5; margin-bottom:7px; }
+  .log li b{ color:var(--teal); }
+  section.patterns{ margin:4px 22px 26px; background:var(--card); border-radius:16px; box-shadow:0 2px 14px rgba(20,35,60,.08); padding:14px 18px 18px; }
+  section.patterns h2{ margin:2px 0 4px; font-size:16px; }
+  section.patterns p.sub{ margin:0 0 10px; color:var(--mut); font-size:13.5px; }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .chips button{ font-size:12.5px; padding:5px 11px; }
+  .pdesc{ font-size:14px; line-height:1.5; background:#f7fafc; border:1px solid #e2e9f2; border-radius:10px; padding:10px 12px; margin-bottom:8px; min-height:42px; }
+  /* SVG node bits */
+  .nodeBox{ fill:#fff; stroke-width:2; }
+  .nodeHead{ font-size:15px; font-weight:700; fill:var(--ink); }
+  .propPill{ fill:#eef4ff; stroke:#b9cdf5; }
+  .propName{ font-size:11.5px; fill:#46608c; }
+  .propVal{ font-size:12px; font-weight:700; fill:#1d3fbf; }
+  .mRow{ fill:#f2fbfb; stroke:#a8d8dc; cursor:pointer; }
+  .mRow:hover{ fill:#dff5f5; }
+  .mRow.hot{ fill:#ffe9bd; stroke:var(--amber); }
+  .mName{ font-size:12.5px; font-weight:600; fill:#0b5560; }
+  .mNote{ font-size:10.5px; fill:#6d8a8e; }
+  .edge{ fill:none; stroke:#9fb4cc; stroke-width:2; stroke-dasharray:5 5; }
+  .edgeLabel{ font-size:11px; fill:#5b6b82; font-style:italic; }
+  .circ{ cursor:pointer; }
+  .circName{ font-size:13px; font-weight:700; fill:#fff; text-anchor:middle; }
+  .flash{ animation:fl .8s ease; }
+  @keyframes fl{ 0%{ filter:brightness(1);} 30%{ filter:brightness(1.35);} 100%{ filter:brightness(1);} }
+  .fadeSwap{ transition:opacity .35s ease, transform .35s ease; transform-box:fill-box; transform-origin:center; }
+  footer{ padding:0 22px 24px; color:var(--mut); font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔍 Reflective Code Reader — Prototype 1</h1>
+  <p>Code, drawn as the things it talks about. Below is a tiny living model of a <b>Gcoin wallet</b>: four objects,
+     linked by who calls what. <b>Click a circle</b> to look inside it — it becomes a box: <b>pills</b> are its properties,
+     <b>comb-frond rows</b> are its methods. Press <b>▶ Play the story</b> and watch one gift of ₲5 travel through the system,
+     with a bubble at each step explaining <i>why</i> it happens.</p>
+</header>
+
+<div class="bar">
+  <button class="primary" id="btnPlay">▶ Play the story</button>
+  <button id="btnStep">Step ⏭</button>
+  <button id="btnReset">↺ Reset</button>
+  <button id="btnExpand">Expand all</button>
+  <button id="btnCollapse">Collapse all</button>
+  <span class="hint">Tip: click any method row to fire that call yourself.</span>
+</div>
+
+<main>
+  <div class="stageWrap">
+    <svg id="stage" viewBox="0 0 800 660" role="img" aria-label="Object graph">
+      <g id="edges"></g>
+      <g id="nodes"></g>
+      <g id="fx"></g>
+    </svg>
+  </div>
+  <aside>
+    <div class="bubble idle" id="bubble">
+      <h3>Why — the explanation bubble</h3>
+      <p id="bubbleText">Press play, step through the story, or click a method row. Each action explains itself here, in plain language.</p>
+    </div>
+    <div class="log">
+      <h3>📖 The story so far</h3>
+      <ol id="storyLog"><li style="color:#8a97a8">Nothing has happened yet.</li></ol>
+    </div>
+  </aside>
+</main>
+
+<section class="patterns">
+  <h2>The action grammar — one motion per logical action</h2>
+  <p class="sub">The reader's whole vocabulary. The same action always looks the same, in any program, so once you've learned these 14 glyphs you can follow any flow. Click one to watch it live.</p>
+  <div class="chips" id="chips"></div>
+  <div class="pdesc" id="pdesc">Pick a pattern above.</div>
+  <svg id="pstage" viewBox="0 0 760 170"></svg>
+</section>
+
+<footer>Prototype 1: hand-modeled objects + pattern-driven animation (VISUALIZATION_PATTERNS.md §1–§3). Next: feed it a real trace from the wallet code. Colors are grammatical — amber = a value traveling · teal = control flow · violet = creation · red = failure · grey = skipped.</footer>
+
+<script>
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+function el(tag, attrs, parent){ const e=document.createElementNS(NS,tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(parent) parent.appendChild(e); return e; }
+function txt(parent, x, y, s, attrs){ const t=el("text", Object.assign({x:x,y:y}, attrs||{}), parent); t.textContent=s; return t; }
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function tween(dur, fn, done){ const t0=performance.now(); (function f(t){ const k=clamp((t-t0)/dur,0,1); fn(k*k*(3-2*k)); if(k<1) requestAnimationFrame(f); else if(done) done(); })(t0); }
+
+/* ============ THE MODEL (what a reflective reader would extract) ============ */
+const OBJECTS = {
+  wallet: { name:"Wallet", icon:"👛", color:"#2b6cb0", x:36, y:30,
+    props:[["owner","“Ada”"],["balance","₲ 848"],["device","iPhone"]],
+    methods:[["accrue()","time passes → +₲"],["send(₲5, Ben)","give a gift"],["sync()","check with accountant"]] },
+  coin: { name:"Coin ₲5", icon:"🪙", color:"#b7791f", x:472, y:30,
+    props:[["amount","₲ 5"],["from","Ada"],["vitality","fresh ✦"]],
+    methods:[["transfer(to)","change hands"],["age()","idle → fades"]] },
+  strand: { name:"Strand", icon:"🧵", color:"#6b46c1", x:36, y:356,
+    props:[["events","12 recorded"],["head","hash a3f9…"],["owner","Ada"]],
+    methods:[["append(event)","write it down"],["verify()","check the chain"]] },
+  acct: { name:"Accountant", icon:"🧮", color:"#2c7a4b", x:472, y:356,
+    props:[["pool","dyme fund"],["peers","38 online"],["role","witness"]],
+    methods:[["broker(a, b)","introduce peers"],["affirm(coin)"," countersign"]] },
+};
+const EDGES = [
+  { id:"e-send",  from:"wallet", to:"coin",   label:"send calls transfer", why:"The Wallet can't move a coin by wishing — it asks the Coin to change hands, so the Coin itself can enforce the rules of changing hands (never spent twice, never by a stranger)." },
+  { id:"e-tapp",  from:"coin",   to:"strand", label:"transfer appends the event", why:"A transfer that isn't written down didn't happen. The Coin asks Ada's Strand to record the event, so the gift is provable forever." },
+  { id:"e-acc",   from:"wallet", to:"strand", label:"accrue appends the mint", why:"When a new minute of Ada's life ticks by, the Wallet records its minting on her Strand — one entry per minute, so nobody can mint the same minute twice." },
+  { id:"e-sync",  from:"wallet", to:"acct",   label:"sync asks the broker", why:"Ada's wallet was offline. It asks an Accountant — a volunteer witness — who can introduce it to peers and vouch for what happened while she was away." },
+  { id:"e-ver",   from:"acct",   to:"strand", label:"broker asks verify", why:"Before vouching, the Accountant checks the Strand's chain of hashes. If even one link were altered, verification would fail — that's how a witness knows the record is honest." },
+];
+const METHOD_EDGE = { "send(₲5, Ben)":"e-send", "transfer(to)":"e-tapp", "accrue()":"e-acc", "sync()":"e-sync", "broker(a, b)":"e-ver" };
+const state = {}; Object.keys(OBJECTS).forEach(k=> state[k]={ open:false });
+
+/* ============ RENDERING: circle ⇄ comb box ============ */
+const BW = 292;                       // expanded box width
+function boxH(o){ return 46 + o.props.length*30 + o.methods.length*34 + 14; }
+function center(k){ const o=OBJECTS[k]; return state[k].open ? [o.x+BW/2, o.y+boxH(o)/2] : [o.x+44, o.y+44]; }
+function port(k, other){ // point on the node's border facing the other node
+  const [cx,cy]=center(k), [ox,oy]=center(other), o=OBJECTS[k];
+  if(!state[k].open) return [cx,cy];
+  const dx=ox-cx, dy=oy-cy, hw=BW/2, hh=boxH(o)/2;
+  const s=Math.min(hw/Math.abs(dx||1e-6), hh/Math.abs(dy||1e-6));
+  return [cx+dx*s, cy+dy*s];
+}
+function drawEdges(){
+  const g=$("edges"); g.innerHTML="";
+  EDGES.forEach(e=>{
+    const [x1,y1]=port(e.from,e.to), [x2,y2]=port(e.to,e.from);
+    const mx=(x1+x2)/2, my=(y1+y2)/2 - 26;
+    const p=el("path",{id:"path-"+e.id, d:`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`, class:"edge"},g);
+    txt(g,(x1+x2)/2,(y1+y2)/2-30, e.label, {class:"edgeLabel","text-anchor":"middle"});
+  });
+}
+function drawNode(k){
+  const o=OBJECTS[k], g=el("g",{id:"node-"+k}, $("nodes"));
+  /* collapsed: circle */
+  const cg=el("g",{class:"fadeSwap circ", id:"circ-"+k}, g);
+  el("circle",{cx:o.x+44, cy:o.y+44, r:40, fill:o.color, stroke:"#fff","stroke-width":3}, cg);
+  txt(cg, o.x+44, o.y+40, o.icon, {"font-size":26,"text-anchor":"middle"});
+  txt(cg, o.x+44, o.y+104, o.name, {"font-size":13.5,"font-weight":700, fill:"#33475e","text-anchor":"middle"});
+  txt(cg, o.x+44, o.y+120, "tap to open", {"font-size":10.5, fill:"#8a97a8","text-anchor":"middle"});
+  cg.addEventListener("click", ()=> setOpen(k,true));
+  /* expanded: comb box */
+  const bg=el("g",{class:"fadeSwap", id:"box-"+k, opacity:0, "pointer-events":"none"}, g);
+  const H=boxH(o);
+  el("rect",{x:o.x, y:o.y, width:BW, height:H, rx:16, class:"nodeBox", stroke:o.color}, bg);
+  el("rect",{x:o.x, y:o.y, width:BW, height:40, rx:16, fill:o.color}, bg);
+  el("rect",{x:o.x, y:o.y+24, width:BW, height:16, fill:o.color}, bg);
+  txt(bg, o.x+14, o.y+27, o.icon+"  "+o.name, {class:"nodeHead", fill:"#fff"});
+  const xBtn=txt(bg, o.x+BW-24, o.y+27, "✕", {"font-size":14, fill:"#fff", cursor:"pointer","font-weight":700});
+  xBtn.addEventListener("click", ()=> setOpen(k,false));
+  txt(bg, o.x+BW-44, o.y+27, "object", {"font-size":10, fill:"#ffffffbb"});
+  let y=o.y+52;
+  txt(bg, o.x+14, y-6, "PROPERTIES — what it has", {"font-size":9.5, fill:"#8a97a8","letter-spacing":".08em"});
+  o.props.forEach(([n,v])=>{
+    el("rect",{x:o.x+14, y:y, width:BW-28, height:24, rx:12, class:"propPill"}, bg);
+    txt(bg, o.x+26, y+16, n, {class:"propName"});
+    txt(bg, o.x+BW-26, y+16.5, v, {class:"propVal","text-anchor":"end", id:`pv-${k}-${n}`});
+    y+=30;
+  });
+  y+=6;
+  txt(bg, o.x+14, y-2, "METHODS — what it can do", {"font-size":9.5, fill:"#8a97a8","letter-spacing":".08em"});
+  y+=4;
+  el("line",{x1:o.x+20, y1:y+8, x2:o.x+20, y2:y + o.methods.length*34 - 6, stroke:o.color,"stroke-width":3,"stroke-linecap":"round", opacity:.5}, bg);
+  o.methods.forEach(([m,note])=>{
+    const row=el("g",{}, bg);
+    el("line",{x1:o.x+20, y1:y+15, x2:o.x+30, y2:y+15, stroke:o.color,"stroke-width":3}, row);
+    const r=el("rect",{x:o.x+30, y:y, width:BW-44, height:30, rx:9, class:"mRow", id:`mrow-${k}-${m}`}, row);
+    txt(row, o.x+42, y+19.5, m, {class:"mName"});
+    txt(row, o.x+BW-24, y+19, note, {class:"mNote","text-anchor":"end"});
+    row.addEventListener("click", ()=> fireMethod(k,m));
+    y+=34;
+  });
+}
+function setOpen(k, open){
+  state[k].open=open;
+  const c=$("circ-"+k), b=$("box-"+k);
+  c.style.opacity = open?0:1; c.style.pointerEvents = open?"none":"auto"; c.style.transform = open?"scale(.6)":"scale(1)";
+  b.style.opacity = open?1:0; b.style.pointerEvents = open?"auto":"none"; b.style.transform = open?"scale(1)":"scale(.92)";
+  fitHeight(); drawEdges();
+}
+function fitHeight(){
+  let bottom=660;
+  Object.keys(OBJECTS).forEach(k=>{ const o=OBJECTS[k]; if(state[k].open) bottom=Math.max(bottom, o.y+boxH(o)+30); });
+  $("stage").setAttribute("viewBox", `0 0 800 ${bottom}`);
+}
+Object.keys(OBJECTS).forEach(drawNode); drawEdges();
+["wallet","coin"].forEach(k=> setOpen(k,true));
+
+/* ============ BUBBLES, LOG, PULSES ============ */
+function bubble(title, text){ const b=$("bubble"); b.classList.remove("idle"); b.querySelector("h3").textContent="Why — "+title; $("bubbleText").textContent=text; }
+function logStep(html){ const ol=$("storyLog"); if(ol.querySelector("li") && ol.children[0].style.color) ol.innerHTML=""; const li=document.createElement("li"); li.innerHTML=html; ol.appendChild(li); }
+function flashNode(k){ const n=$("node-"+k); n.classList.remove("flash"); void n.getBBox(); n.classList.add("flash"); }
+function setProp(k, name, val){ const t=$("pv-"+k+"-"+name); if(!t) return; t.textContent=val; flashNode(k); }
+function hotRow(k, m, ms){ const r=$("mrow-"+k+"-"+CSS.escape(m)); if(!r) return; r.classList.add("hot"); setTimeout(()=>r.classList.remove("hot"), ms||1400); }
+function pulse(edgeId, opts){
+  opts = opts||{}; const path=$("path-"+edgeId); if(!path) return Promise.resolve();
+  const L=path.getTotalLength(), fx=$("fx");
+  const dot=el("circle",{r:opts.r||7, fill:opts.color||"#d9930d", stroke:"#fff","stroke-width":2}, fx);
+  let pill=null;
+  if(opts.label){ pill=el("g",{},fx); const w=16+opts.label.length*7.5;
+    el("rect",{x:-w/2, y:-24, width:w, height:19, rx:9.5, fill:"#fff7e0", stroke:"#d9930d"}, pill);
+    txt(pill, 0, -10.5, opts.label, {"font-size":11,"font-weight":700, fill:"#8a5c00","text-anchor":"middle"}); }
+  const dur=opts.dur||1150;
+  return new Promise(res=> tween(dur, k=>{
+    const t = opts.reverse ? 1-k : k, p=path.getPointAtLength(t*L);
+    dot.setAttribute("cx",p.x); dot.setAttribute("cy",p.y);
+    if(pill) pill.setAttribute("transform",`translate(${p.x},${p.y})`);
+  }, ()=>{ dot.remove(); if(pill) pill.remove(); res(); }));
+}
+const wait = ms => new Promise(r=>setTimeout(r,ms));
+
+const LOCAL = {
+  "append(event)": (k)=>{ const cur=OBJECTS.strand.props[0][1]; const n=parseInt(cur)+1; OBJECTS.strand.props[0][1]=n+" recorded"; setProp("strand","events", n+" recorded");
+    bubble("Write (A5)", "The Strand writes the event into its chain and links it to the previous hash. From now on, this moment can't be quietly edited — changing it would break every link after it."); },
+  "verify()": (k)=> bubble("Read (A4)", "Verify walks the chain link by link, re-checking each hash. It changes nothing — it's a peek, not a touch — but its answer decides whether witnesses trust this Strand."),
+  "age()": (k)=>{ setProp("coin","vitality","fading ◐"); bubble("Half-life (§9E)", "An idle coin fades: its vitality halves every half-life until it freezes and can no longer be spent. The cure is circulation — being given away recharges it. Hoarded gratitude dies; shared gratitude lives."); },
+  "affirm(coin)": (k)=> bubble("Checkpoint (A14)", "The Accountant countersigns the coin's checkpoint — a wax seal on the record. It doesn't own the coin or approve the gift; it simply testifies: “I saw this, and the chain was honest.”"),
+};
+function fireMethod(k, m){
+  hotRow(k,m);
+  const eid = METHOD_EDGE[m];
+  if(eid){ const e=EDGES.find(x=>x.id===eid); setOpen(e.from,true); setOpen(e.to,true);
+    bubble("Call (A1)", e.why);
+    logStep(`<b>${OBJECTS[e.from].name}</b> calls <b>${OBJECTS[e.to].name}</b> — ${e.label}.`);
+    pulse(eid,{label: m.split("(")[0]}).then(()=> flashNode(e.to));
+  } else if(LOCAL[m]) LOCAL[m](k);
+}
+
+/* ============ THE STORY ============ */
+let stepIx=0, playing=false;
+const STORY = [
+  async ()=>{ hotRow("wallet","accrue()"); bubble("Time passes — a mint (A3)", "One minute of Ada's life just went by. Her Wallet turns it into one new coin — ₲1 — and asks her Strand to record the minting, so this minute can never be minted twice.");
+    await pulse("e-acc",{label:"mint ₲1", color:"#7c5cd6"}); OBJECTS.strand.props[0][1]="13 recorded"; setProp("strand","events","13 recorded"); setProp("wallet","balance","₲ 849");
+    logStep("A minute passes. Ada's <b>Wallet</b> mints <b>₲1</b> and her <b>Strand</b> records it. Balance: ₲849."); },
+  async ()=>{ hotRow("wallet","send(₲5, Ben)"); const e=EDGES[0]; bubble("Call (A1)", e.why);
+    await pulse("e-send",{label:"₲5 → Ben"}); flashNode("coin"); setProp("wallet","balance","₲ 844");
+    logStep("Ada taps <b>send</b>. The <b>Wallet</b> asks the <b>Coin</b> to change hands for Ben — ₲5 leaves her balance."); },
+  async ()=>{ hotRow("coin","transfer(to)"); const e=EDGES[1]; bubble("Call (A1)", e.why);
+    await pulse("e-tapp",{label:"record me"}); OBJECTS.strand.props[0][1]="14 recorded"; setProp("strand","events","14 recorded");
+    bubble("Return (A2)", "The Strand answers with a signed receipt — the hash of the new entry. The Coin (and Ada) now hold proof the gift was written down, and the receipt travels back along the same path the request took.");
+    await pulse("e-tapp",{reverse:true, color:"#0e7c86", r:5, label:"receipt ✓"});
+    logStep("The <b>Coin</b> has the <b>Strand</b> record the transfer, and carries the signed <b>receipt</b> back."); },
+  async ()=>{ hotRow("wallet","sync()"); const e=EDGES[3]; bubble("Call (A1)", e.why);
+    await pulse("e-sync",{label:"who's there?"}); flashNode("acct");
+    logStep("Back online, Ada's <b>Wallet</b> checks in with an <b>Accountant</b>."); },
+  async ()=>{ hotRow("acct","broker(a, b)"); const e=EDGES[4]; bubble("Call (A1)", e.why);
+    await pulse("e-ver",{label:"check chain"}); 
+    bubble("Return (A2)", "Verification passes: every hash link in Ada's Strand checks out. The Accountant countersigns — and Ben's wallet, seeing a witnessed and honest chain, accepts the ₲5 gift. The story is complete: a minute of a life, given, recorded, and believed.");
+    await pulse("e-ver",{reverse:true, color:"#0e7c86", r:5, label:"valid ✓"}); flashNode("wallet");
+    logStep("The <b>Accountant</b> verifies the <b>Strand</b> — chain valid ✓ — and countersigns. Ben's ₲5 is accepted."); },
+];
+async function playAll(){ if(playing) return; playing=true; while(stepIx<STORY.length){ await STORY[stepIx++](); await wait(650); } playing=false; }
+async function stepOnce(){ if(playing||stepIx>=STORY.length) return; playing=true; await STORY[stepIx++](); playing=false; }
+function resetStory(){ stepIx=0; playing=false; $("storyLog").innerHTML='<li style="color:#8a97a8">Nothing has happened yet.</li>';
+  OBJECTS.strand.props[0][1]="12 recorded"; setProp("strand","events","12 recorded"); setProp("wallet","balance","₲ 848"); setProp("coin","vitality","fresh ✦");
+  bubble("Reset","Press play, step through the story, or click a method row. Each action explains itself here, in plain language."); $("bubble").classList.add("idle"); }
+$("btnPlay").addEventListener("click", playAll);
+$("btnStep").addEventListener("click", stepOnce);
+$("btnReset").addEventListener("click", resetStory);
+$("btnExpand").addEventListener("click", ()=> Object.keys(OBJECTS).forEach(k=>setOpen(k,true)));
+$("btnCollapse").addEventListener("click", ()=> Object.keys(OBJECTS).forEach(k=>setOpen(k,false)));
+
+/* ============ PATTERN STAGE (the action grammar, §2) ============ */
+const PATTERNS = [
+  ["A1","Call","A pulse carrying the parameters travels from caller to callee. “{caller} asks {callee} to {method}, handing it {params}.”"],
+  ["A2","Return","A thinner pulse travels back carrying the result pill. “{callee} answers with {result}, which {caller} keeps.”"],
+  ["A3","Create","A new circle blossoms out of its creator, threaded to its class. “A new {class} is born — its own properties, independent of the others.”"],
+  ["A4","Read","The property pill flashes; a ghost copy slides to the reader — the original never moves. “{reader} peeks at {prop} without changing it.”"],
+  ["A5","Write","The pill fills with new color; the old value fades as the new one lands. “This is the exact moment the state changes.”"],
+  ["A6","Branch","The path forks; one gate opens, the other greys out. “The condition is true/false, so we go this way — the other path is skipped this time.”"],
+  ["A7","Loop","A bead circles the track once per item, counter ticking. “We repeat this for each item — watch the bead: n times.”"],
+  ["A8","Transform","Items stream through a lens: reshaped (map), some dropped (filter), or merged into one (reduce)."],
+  ["A9","Async / wait","The pulse parks in a dashed waiting ring while the caller dims — then the ring fills and the answer fires. “Nothing is stuck; other work can happen meanwhile.”"],
+  ["A10","Emit / listen","Rings radiate from the emitter; every listener ripples as the wave reaches it. “It announces — it doesn't know who is listening.”"],
+  ["A11","Throw / error","A jagged red pulse bursts back up the call chain until a catch-net stops it. “The failure travels back until someone handles it.”"],
+  ["A12","Recurse","The object nests a smaller copy of itself, Russian-doll style, depth counter running. “Each doll must finish before the one around it can.”"],
+  ["A13","Hand-off","The pill physically leaves one box and docks into the other. “Ownership moves — the source slot is now empty.”"],
+  ["A14","Checkpoint","A wax-seal stamp lands; a thread ties the moment to its anchor. “This is now permanent and provable.”"],
+];
+const chips=$("chips");
+PATTERNS.forEach(([id,name])=>{ const b=document.createElement("button"); b.textContent=id+" · "+name; b.addEventListener("click",()=> selectPattern(id, b)); chips.appendChild(b); });
+let curPat="A1";
+function selectPattern(id, btn){ curPat=id; [...chips.children].forEach(c=>c.classList.remove("on")); if(btn) btn.classList.add("on");
+  const p=PATTERNS.find(x=>x[0]===id); $("pdesc").innerHTML="<b>"+p[0]+" "+p[1]+"</b> — "+p[2]; }
+const PS=$("pstage");
+function pbox(x,y,w,h,label,color){ const g=el("g",{},PS); el("rect",{x:x,y:y,width:w,height:h,rx:12,fill:"#fff",stroke:color||"#7d93b2","stroke-width":2},g); if(label) txt(g,x+w/2,y+h/2+5,label,{"font-size":13,"font-weight":700,fill:"#33475e","text-anchor":"middle"}); return g; }
+function pdot(x,y,r,fill){ return el("circle",{cx:x,cy:y,r:r||7,fill:fill||"#d9930d",stroke:"#fff","stroke-width":2},PS); }
+function ppill(x,y,label,fill){ const g=el("g",{},PS); const w=24+label.length*7; el("rect",{x:x-w/2,y:y-11,width:w,height:22,rx:11,fill:fill||"#eef4ff",stroke:"#b9cdf5"},g); txt(g,x,y+4.5,label,{"font-size":11.5,"font-weight":700,fill:"#1d3fbf","text-anchor":"middle"}); return g; }
+const L=(a,b,t)=>a+(b-a)*t, seg=(t,a,b)=>clamp((t-a)/(b-a),0,1), ease=t=>t*t*(3-2*t);
+const PDRAW = {
+  A1(t){ pbox(90,59,120,52,"Caller","#2b6cb0"); pbox(550,59,120,52,"Callee","#6b46c1"); const k=ease(seg(t,0,.55)); pdot(L(210,550,k),85,8); if(k>=1) pdot(610,85,16,"none") .setAttribute("stroke","#d9930d"); txt(PS,380,150,"the ask travels →",{"font-size":12,fill:"#5b6b82","text-anchor":"middle"}); },
+  A2(t){ pbox(90,59,120,52,"Caller","#2b6cb0"); pbox(550,59,120,52,"Callee","#6b46c1"); if(t<.45){ pdot(L(210,550,ease(seg(t,0,.45))),85,7,"#0e7c86"); } else { const k=ease(seg(t,.5,.97)); const x=L(550,210,k); pdot(x,85,5,"#0e7c86"); ppill(x,58,"result ✓","#e6f7ec"); } },
+  A3(t){ pbox(90,59,120,52,"Creator","#7c5cd6"); const k=ease(seg(t,.1,.55)); el("line",{x1:210,y1:85,x2:L(210,520,k),y2:85,stroke:"#7c5cd6","stroke-dasharray":"4 4"},PS); const c=el("circle",{cx:560,cy:85,r:36*k,fill:"#7c5cd6",opacity:.25+.75*k},PS); if(k>0) txt(PS,560,90,"new!",{"font-size":12,"font-weight":700,fill:"#fff","text-anchor":"middle"}); },
+  A4(t){ pbox(500,45,190,80,"Owner","#2b6cb0"); ppill(595,85,"balance ₲848"); pbox(70,59,120,52,"Reader","#0e7c86"); const k=ease(seg(t,.1,.7)); if(k>0&&k<1) ppill(L(560,215,k),58,"₲848","#fff7e0"); if(k>=1) ppill(215,58,"₲848","#fff7e0"); },
+  A5(t){ pbox(265,40,230,90,"Wallet","#2b6cb0"); const on=t>.5; const g=ppill(380,85, on?"balance ₲ 849":"balance ₲ 848", on?"#ffe9bd":"#eef4ff"); if(t>.44&&t<.62) g.setAttribute("opacity", .4+.6*Math.abs(Math.sin(t*40))); txt(PS,380,155, on?"changed!":"about to change…",{"font-size":12,fill:"#5b6b82","text-anchor":"middle"}); },
+  A6(t,cyc){ pbox(60,59,110,52,"Decider","#0e7c86"); const up=(cyc%2===0); const yA=42,yB=128; el("path",{d:"M170 85 Q 330 20 470 "+yA, fill:"none", stroke: up?"#0e7c86":"#c3cedd","stroke-width":2.5},PS); el("path",{d:"M170 85 Q 330 150 470 "+yB, fill:"none", stroke: up?"#c3cedd":"#0e7c86","stroke-width":2.5},PS); pbox(470,16,150,52, up?"Path taken ✓":"Skipped", up?"#0e7c86":"#c3cedd"); pbox(470,102,150,52, up?"Skipped":"Path taken ✓", up?"#c3cedd":"#0e7c86"); const k=ease(seg(t,.05,.8)); const px=L(170,470,k), py=85+ (up?-1:1)*Math.sin(k*Math.PI)*43; pdot(px,py,7, up?"#0e7c86":"#0e7c86"); },
+  A7(t){ el("circle",{cx:380,cy:85,r:52,fill:"none",stroke:"#a8d8dc","stroke-width":3},PS); const n=Math.floor(t*3)%3, ang=t*3*Math.PI*2 - Math.PI/2; pdot(380+52*Math.cos(ang), 85+52*Math.sin(ang), 8, "#0e7c86"); txt(PS,380,90,"item "+(Math.min(3,Math.floor(t*3)+1))+" of 3",{"font-size":13,"font-weight":700,fill:"#33475e","text-anchor":"middle"}); txt(PS,380,160,"one trip around = one item handled",{"font-size":12,fill:"#5b6b82","text-anchor":"middle"}); },
+  A8(t){ el("polygon",{points:"330,40 430,70 430,100 330,130", fill:"#eef4ff", stroke:"#7c5cd6","stroke-width":2},PS); txt(PS,380,90,"lens",{"font-size":12,"font-weight":700,fill:"#7c5cd6","text-anchor":"middle"}); for(let i=0;i<6;i++){ const ph=((t*1.2 + i/6)%1); const x=L(40,740,ph); let y=85+Math.sin(i*2.4)*26*(1-Math.abs(ph-.5)*1.4); if(ph>.47&&ph<.55){ if(i%3===2){ pdot(x, 150, 5, "#c3cedd"); continue; } } pdot(x,y,6, i%3===2&&ph>=.55 ? "#c3cedd" : "#d9930d"); } txt(PS,380,162,"6 go in · some are reshaped, some drop out",{"font-size":12,fill:"#5b6b82","text-anchor":"middle"}); },
+  A9(t){ const a=pbox(70,59,120,52,"Caller","#2b6cb0"); pbox(570,59,120,52,"Answer","#2c7a4b"); el("circle",{cx:380,cy:85,r:27,fill: t>.78?"#e6f7ec":"#fff",stroke:"#d9930d","stroke-width":2,"stroke-dasharray": t>.78?"0":"5 4"},PS); txt(PS,380,89,"wait",{"font-size":11.5,"font-weight":700,fill:"#8a5c00","text-anchor":"middle"}); if(t<.3){ pdot(L(190,353,ease(seg(t,0,.3))),85,7); a.setAttribute("opacity",1);} else if(t<.78){ a.setAttribute("opacity",.4); const ang=t*9; pdot(380+27*Math.cos(ang),85+27*Math.sin(ang),5.5); } else { a.setAttribute("opacity",1); pdot(L(407,570,ease(seg(t,.78,1))),85,7,"#2c7a4b"); } },
+  A10(t){ el("circle",{cx:380,cy:85,r:9,fill:"#7c5cd6"},PS); txt(PS,380,65,"Emitter",{"font-size":11.5,"font-weight":700,fill:"#33475e","text-anchor":"middle"}); [0,.33,.66].forEach(o=>{ const ph=(t+o)%1, r=ph*230; const c=el("circle",{cx:380,cy:85,r:r,fill:"none",stroke:"#7c5cd6","stroke-width":2,opacity:1-ph},PS); }); [130,630].forEach((x,i)=>{ const d=Math.abs(x-380); const hit = [0,.33,.66].some(o=> Math.abs(((t+o)%1)*230 - d) < 14); const c=pdot(x,85, hit?13:9, "#0e7c86"); txt(PS,x,120,"listener",{"font-size":11,fill:"#5b6b82","text-anchor":"middle"}); }); },
+  A11(t){ pbox(70,59,120,52,"Caller","#d64545"); pbox(570,59,120,52,"Failing","#d64545"); const pts=[]; for(let i=0;i<=8;i++) pts.push([L(570,190,i/8), 85 + (i%2? -13:13)*(i>0&&i<8?1:0)]); el("polyline",{points:pts.map(p=>p.join(",")).join(" "), fill:"none", stroke:"#f0b4b4","stroke-width":2},PS); const k=seg(t,.05,.75), ix=k*8, i0=Math.floor(ix), fr=ix-i0; const p0=pts[Math.min(8,i0)], p1=pts[Math.min(8,i0+1)]; pdot(L(p0[0],p1[0],fr), L(p0[1],p1[1],fr), 8, "#d64545"); if(t>.8) txt(PS,130,140,"caught — or it stops the show",{"font-size":12,fill:"#d64545","text-anchor":"middle"}); },
+  A12(t){ const d=Math.min(4, Math.floor(t*4)+1); for(let i=0;i<4;i++){ const s=1-i*.19, w=300*s, h=110*s, x=380-w/2, y=85-h/2; el("rect",{x:x,y:y,width:w,height:h,rx:12,fill: i<d?"#f2fbfb":"#f7fafc", stroke: i===d-1?"#d9930d":"#a8d8dc","stroke-width": i===d-1?3:1.5},PS); } txt(PS,380,160,"depth "+d+" — same method, smaller piece",{"font-size":12,fill:"#5b6b82","text-anchor":"middle"}); },
+  A13(t){ pbox(90,50,170,70,"Giver","#2b6cb0"); pbox(500,50,170,70,"Receiver","#2c7a4b"); el("rect",{x:118,y:72,width:114,height:26,rx:13,fill:"none",stroke:"#c3cedd","stroke-dasharray":"4 3"},PS); const k=ease(seg(t,.1,.8)); ppill(L(175,585,k), 85, "the ₲5 coin", "#fff7e0"); txt(PS,380,155, k>=1?"moved — giver's slot is empty":"traveling…",{"font-size":12,fill:"#5b6b82","text-anchor":"middle"}); },
+  A14(t){ pbox(280,45,200,80,"The record","#6b46c1"); el("line",{x1:430,y1:105,x2:640,y2:140,stroke:"#6b46c1","stroke-dasharray":"4 4"},PS); pdot(648,142,6,"#6b46c1"); txt(PS,648,162,"anchor",{"font-size":11,fill:"#5b6b82","text-anchor":"middle"}); const k=seg(t,.15,.45); const s= k<1? .5+.5*ease(k) : 1+ .12*Math.max(0,1-(t-.45)*6); const g=el("g",{transform:`translate(380,85) scale(${s})`},PS); el("circle",{r:24, fill:"#6b46c1", opacity:.9},g); txt(g,0,5,"✓",{"font-size":20,"font-weight":700,fill:"#fff","text-anchor":"middle"}); },
+};
+function pframe(now){ PS.innerHTML=""; const cyc=Math.floor(now/2800); PDRAW[curPat]( (now%2800)/2800, cyc ); requestAnimationFrame(pframe); }
+selectPattern("A1", chips.children[0]); requestAnimationFrame(pframe);
+</script>
+</body>
+</html>
