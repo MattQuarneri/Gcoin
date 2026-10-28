@@ -1,8 +1,11 @@
 # Gcoin MVP Proof-of-Concept Spec
 
-**Status:** Draft v0.3 — 2026-10-20, for Matthew's review (v0.2 added §2A full-chain
+**Status:** Draft v0.4 — 2026-10-23, for Matthew's review (v0.2 added §2A full-chain
 commitment rule, §9A zkTLS Web2 attestation, ZK-by-default data sharing in §4;
-v0.3 adds §8A the Knot graph topology + witness nodes, and §9B MonyTyme.com genesis)
+v0.3 adds §8A the Knot graph topology + witness nodes, and §9B MonyTyme.com genesis;
+v0.4 adds §9D the trust graph — vouching, external attestation adapters, per-bit
+provenance, trust-chain evaluation, institutional stripping — and §9E coin aging:
+half-life, the circulation recharger, freeze/death, which supersedes GC persistence)
 **Source material:** MattQuarneri/Gcoin (`README.md`, `plans/G-Coin Abstract.md`,
 `plans/Gratitude Coin (G-Coin) - idea.md`, `plans/Gratitude Coin Spec v1.0.md`,
 `plans/Reimagining the Economy/...`), plus Matthew's 2026-10-19 requirements.
@@ -30,7 +33,7 @@ provenance, WebAuthn/WebRTC-native transfer, and signature-chained double-spend 
 - A public blockchain deployment — ledger is an append-only hash-chained log with
   pluggable anchoring (§8); anchoring to a testnet is a milestone, not day-one.
 - The full thermodynamics model (vitality decay/recharge half-life) from Spec v1.0 §14–15:
-  documented as hooks, not implemented.
+  **specified in §9E (v0.4)** — design adopted, POC implementation still excluded.
 - The Committed/60%–Liquid/40% float split: the contract model enforces a budget
   ceiling, but the fixed 60/40 rule is a documented extension, not POC behavior.
 - Exchange value, pricing, wallets-to-fiat — out of scope entirely.
@@ -47,7 +50,7 @@ The repo converges on one two-state model, and the POC implements it verbatim:
 | State | What it is | Rules |
 |---|---|---|
 | **Mortal Minutes (MM)** | Daily potential. 1440 per verified person per day, one per minute. | Never transferable. Expire at the user's Pay Day boundary, 04:00 local (§3; the repo's Midnight Rule, shifted). A minute can be **spent exactly once**. |
-| **Gratitude Coins (GC)** | Realized value. Minted when an MM is spent. | Transferable. Persistent (no Pay Day expiry). Carries provenance unless the spender strips it. |
+| **Gratitude Coins (GC)** | Realized value. Minted when an MM is spent. | Transferable. No Pay Day expiry — but coins **age**: vitality decays by half-life while idle, circulation recharges, and a coin idle past the freeze age can no longer be transacted (§9E, v0.4 — supersedes plain persistence). Carries provenance unless the spender strips it. |
 
 **Key invariant (First Law of Human-Time Economics, Spec v1.0 §13):**
 every GC originates from exactly one voluntarily spent MM; every MM mints exactly once.
@@ -128,7 +131,7 @@ Matthew's framing, made literal — the wallet keeps both books:
 |---|---|---|
 | What it counts | MM as they *accrue*, minute by minute | GC that actually *settled* |
 | Balance lines | Accrued so far (e.g. 1,170 of 1,440 at 23:30 PDT for a 04:00-anchored user); Committed (contracts); Spent from accrual; **Spendable now = accrued − committed − spent**; Projected at Pay Day: 1,440 | GC held (persistent balance); GC received today; GC sent today; GC in-flight (attested, not yet affirmed) |
-| At Pay Day | Accrual book closes: unspent remainder is written off (burned) — recognized capacity that was never realized | Cash book carries forward; nothing expires |
+| At Pay Day | Accrual book closes: unspent remainder is written off (burned) — recognized capacity that was never realized | Cash book carries forward; coins age by idle time toward freeze (§9E) — a third view, the *collection*, holds frozen coins |
 | Answers | "How much of my life today have I allocated — and how much is still mine to give?" | "What do I actually hold, that others gave me?" |
 
 Spending is the conversion event between the books: an MM leaves the accrual book and
@@ -635,6 +638,243 @@ construction, not just detectable:
 | Printed sheet (devices fine) | Attack window only if passphrase also leaks | Rotate recovery key from a device; print a new sheet |
 | Sheet + passphrase both compromised | Attacker can start a rotation | Cancel it from any device within the delay window |
 
+## 9D. The trust graph: vouching, external attestations, and provenance chains (Matthew, 2026-10-22/23)
+
+§9A answers "how do we know this joiner is one person?" with platform evidence
+(zkTLS). Matthew's second door is older and more social: **people vouch for
+people.** A member signs an attestation affirming a piece of information a
+joiner submitted about themselves — their name, their email, their photo —
+the way a mailing list sponsor vouches a new subscriber in. A wallet that
+nobody has vouched for can exist, but it cannot *receive* Gratitude until the
+trust graph says it is attested. This section specifies that model, how
+external trust networks plug into it as evidence, and how identity rides on
+coins afterward — per-bit, under the sender's control — so a recipient can
+judge whether a coin "came from a liar."
+
+### Attestation events
+
+An attestation is a signed event on the **attester's** strand (event type
+`identity.attest`), VC-shaped (W3C Verifiable Credentials data model; §13):
+
+| Field | Content |
+|---|---|
+| `subject` | The joiner's DID |
+| `attribute` | `name` \| `email` \| `photo` (extensible) |
+| `attribute_hash` | Salted hash of the attribute value (per §2A, the value itself never goes on a strand) |
+| `basis` | How the attester knows: `in-person` \| `video` \| `long-known-online` \| `verified-contact` |
+| `expires` | Attestations lapse (proposed POC default: 1 year) unless renewed |
+| `signature` | Attester's device key (§9C) |
+
+Joining is a flow, not a form: the joiner publishes an attestation *request*
+(their self-submitted attributes, hashed), a friend already in the network
+countersigns the pieces they have personally verified, and each countersignature
+braids the two strands — the same knot mechanics as a transfer (§8A). One
+friend can attest the name, another the photo; **pieces are independent**, so
+standing accumulates attribute by attribute, attester by attester.
+
+### Attested standing and the receiving rule
+
+A wallet's **standing** is computed locally from the graph — there is no
+central registry and no global score (§8A's no-gatekeeper rule applies to
+trust too). A recipient's wallet (and the protocol defaults) ask:
+
+- Are the *receiving* wallet's core attributes (name + photo, or email + photo)
+  attested by at least **N distinct attesters** who are themselves in good standing?
+- Do those attesters span more than one cluster (not all vouched-into the
+  network by the same person — a diversity check against vouch rings)?
+- Is any attestation expired, revoked, or under active dispute?
+
+Until standing is reached, incoming Gratitude is held as **pending** (visible,
+attested by the sender, not yet affirmed to the recipient). The sender sees
+"waiting on attestation," which creates the social pressure that makes the
+mailing-list model work: you ask your friend to vouch because a coin is waiting.
+
+### The honest limit, and the discipline around it
+
+Vouching affirms **attributes, not uniqueness**: nothing in a vouch stops one
+human from being vouched into three wallets under three names — and
+₲1,440/day is exactly what a Sybil farmer wants. So the graph carries
+discipline, and this is load-bearing, not garnish:
+
+- **Vouch budgets:** each member may hold only a limited number of live
+  vouches (proposed POC default: 10). Scarcity makes members choosy.
+- **Attester accountability:** a vouch is public on the attester's strand
+  forever. When a wallet is *proven* fraudulent through the dispute process,
+  its attesters lose standing — vouching for a fake is permanently expensive.
+- **Challenge window:** modeled on Proof of Humanity — a new attestation can
+  be disputed during a window (proposed POC default: 7 days); a successful
+  dispute revokes and records the revocation as an event.
+- **Revocation and expiry** are events, not edits — the graph's history is
+  never rewritten, only superseded.
+- Vouching **complements** §9A rather than replacing it: §9A's nullifier
+  still anchors one-person-one-issuance where platform evidence exists; the
+  trust graph stands alone where it doesn't. Either door can raise standing;
+  both together raise it further.
+
+### External attestation adapters: import evidence, never authority
+
+Matthew's direction: link into **all** the existing trust networks, because
+each independent source of evidence compounds — faking one graph is easy,
+faking consistent standing across five unrelated systems is expensive. The
+integration pattern is an **adapter**, and §9A's zkTLS is retroactively the
+first one:
+
+1. The adapter verifies evidence **natively** in the source system (a VC
+   issuer's signature; a BrightID standing check via its node API; the Proof
+   of Humanity registry state and vouch events on-chain; an EAS attestation
+   via its indexer; PGP key-signing signatures from a keyserver).
+2. It then mints a **Gcoin-native** `identity.attest` event on the subject's
+   strand recording: source network, evidence hash, result, and timestamp —
+   signed by whoever ran the verification (the subject importing their own
+   proof, or a witness/accountant countersigning it).
+3. The imported attestation carries a **weight cap**: no single external
+   source may contribute more than a fixed share of standing, so one
+   compromised or low-quality network (PGP keyservers are spam-ridden and
+   their bindings self-asserted — lowest weight) cannot manufacture a
+   trustworthy wallet alone.
+
+Adapters are read-only and advisory. No external network is queried in the
+transaction path, none can veto a wallet, and any client may ignore any
+adapter. That is what keeps this consistent with the anti-Ripple line in
+§8A/§9B: the networks are *witnesses*, never gatekeepers.
+
+### Per-bit provenance: identity that rides on the coin, under the sender's control
+
+§4 set a disclosure **level** (L0–L3) per transfer. Matthew's refinement:
+access rights are set **per bit of identity data on the coin**. Each transfer
+attaches a provenance envelope whose fields (sender name, email, photo, DID,
+standing snapshot) each carry their own access class:
+
+| Access class | Who can read the bit |
+|---|---|
+| `public` | Anyone holding or verifying the coin |
+| `recipient` | The receiving wallet only |
+| `attesters` | The sender's attesters of that attribute (they already know it) |
+| `sealed` | No one by default; openable only by the sender re-issuing the key (e.g. in a dispute) |
+
+Mechanics follow the stack already cited in §13: attribute values travel
+peer-to-peer (never on a strand, §2A); the strand carries the envelope's
+hashes. Selective disclosure uses SD-JWT / BBS+ — the recipient can verify
+that a sealed bit *exists and is attested* (its hash matches a signed
+attestation) without reading it, and can verify a revealed bit against its
+hash. Each bit is encrypted under its own key; the key is wrapped for the
+bit's access class. A coin therefore *retains* its sender's identity in
+hidden form, exactly as much of it as the sender chose, bit by bit.
+
+### Trust-chain evaluation: "did this coin come from a liar?"
+
+Because transfers braid strands (§8A), every coin has a hash-linked lineage
+of wallets. A receiving wallet can walk the coin's provenance chain and
+evaluate each hop **as of now** — including retroactively:
+
+- Was every hop's sender in good standing when they sent? Are they still?
+- Has any attestation in the chain since been revoked, or any hop proven
+  fraudulent in a dispute?
+- Does the chain pass through a wallet that later had its vouches stripped?
+
+The answer is a **local acceptance policy**, not a global verdict — e.g.
+"auto-accept; warn me if any hop within 3 transfers is now revoked; ask me
+before accepting coins whose origin wallet is unattested." Different wallets
+will run different policies; that pluralism is the design. What the chain
+buys is *accountability, not prevention*: a liar's past coins become
+identifiably tainted once the lie is proven, and the proof propagates along
+the very graph the lie traveled. Lying is therefore permanently expensive in
+a way cash never is — while the minutes themselves remain real gratitude,
+whose social value the recipient judges with full information.
+
+### Fungibility and institutional stripping
+
+Provenance creates a tension §4's strip only began to answer: lineage makes
+coins **non-fungible in practice** — the mortal minute of a famous person
+will be prized over an anonymous one (see §9E: that premium is a feature of
+coins as *assets*, and a problem for coins as *currency*). Everyday commerce
+needs uniform coins. §4 mode 3 (strip = audited re-mint, amounts conserved,
+§10 scenario 5) therefore gains an institutional form:
+
+- A **stripping service** (any institution or accountant node may offer one)
+  accepts a provenance-bearing coin, executes the strip, and issues a fresh
+  coin with an empty envelope plus the service's own attestation: "we hold
+  the sealed provenance; amounts conserved." The service's attestation
+  *replaces* the readable chain for downstream wallets.
+- Stripped coins re-enter circulation uniform and interchangeable — currency.
+  The sealed pre-strip provenance remains provable in a dispute through the
+  service, so stripping buys fungibility without buying amnesia for fraud.
+- Anyone may strip their *own* coins at any spend (§4); institutional
+  stripping matters when a recipient's policy requires it (a merchant whose
+  till only accepts uniform coins) — the service is the exchange window
+  between the asset world and the currency world.
+
+## 9E. Asset vs currency: coin aging, the half-life, and the circulation recharger (Matthew, 2026-10-23)
+
+Spec v1.0 §14–15's thermodynamics — deferred as hooks in §1 — is now adopted
+at the design level, because it resolves the duality §9D names: a coin that
+can live forever becomes an *asset* people hoard; Gcoin's minutes are meant
+to *move*. So Gratitude Coins **age**, and circulation is what keeps them
+young. This section **supersedes** §2's "GC: persistent (no Pay Day expiry)"
+and the cash-book line "nothing expires" in §3.1: GC have no *Pay Day*
+expiry, but they do have a lifespan. (The POC wallet still treats GC as
+persistent; aging is specified here, implemented later.)
+
+### Vitality and half-life
+
+Every coin carries a **vitality** derived from its idle time — the time
+since its last transfer (or its mint, if never transferred):
+
+```
+vitality = 2 ^ (-(idle_time / half_life))
+```
+
+Vitality is a display and policy quantity (the wallet can show a coin
+"fresh," "fading," "near frozen"); the hard protocol rule is the **freeze
+age**: when a coin's idle time reaches the freeze threshold, the network
+will not transact it — wallets must refuse to affirm transfers of frozen
+coins, the same way they refuse double-spends (§7). Parameters are
+Matthew's to tune (§12); proposed POC defaults for discussion: half-life
+**30 days**, freeze at **6 half-lives (~180 days idle, vitality < 1/64)**.
+
+### The circulation recharger
+
+Circulation is the recharger: a completed transfer (the affirm event, §6)
+**resets the coin's idle clock** — being given recharges the coin to full
+vitality. Two anti-gaming rules keep the recharger honest:
+
+- Recharge requires a transfer between **distinct wallets in good standing**
+  (a coin passed between your own wallets, or around a wash ring, does not
+  recharge — the trust graph of §9D is what makes "distinct" checkable).
+- A coin can be recharged at most once per **recharge cooldown** (proposed:
+  24h), so rapid ping-ponging can't keep a hoard artificially young.
+
+Hoarding is therefore not merely discouraged but *impossible in effect*:
+value you refuse to circulate dies on schedule, while the network's
+generosity (each person's fresh 1,440 minutes tomorrow) is untouched.
+
+### Freeze and death: the collector's ending
+
+A frozen coin is not deleted and not confiscated. It stays in its wallet —
+visible, verifiable, its provenance envelope and trust chain intact — but
+**inert**: excluded from spendable balance, refused by the transfer
+protocol, playing no further role in the network. Wallets show frozen coins
+in a **collection** view, distinct from the cash book (§3.1 gains a third
+line: *collection — frozen, held as keepsakes*).
+
+This is deliberate, and it completes the asset/currency split:
+
+- **Live coins are currency** — they circulate, they are recharged by being
+  given, stripped coins among them are fungible (§9D).
+- **Dead coins are pure assets** — memorabilia. A collector may *want* a
+  famous person's mortal minute to die in their wallet: the provenance (§9D)
+  is what makes it collectible, the freeze is what makes it final, and its
+  death removes it from the monetary supply without anyone seizing it.
+- **No revival.** A frozen coin can never be recharged or re-minted back
+  into circulation (a strip of a frozen coin is refused like any transfer).
+  Revival would resurrect hoarding with extra steps and break the finality
+  collectors rely on.
+
+Supply consequence, for the record: issuance is a constant 1,440/day/person
+while death is a continuous sink, so the live supply self-limits around
+active circulation rather than growing without bound — the thermodynamics
+of Spec v1.0 §14–15, arriving where it was always pointing.
+
 ## 10. Double-spend scenarios the POC must demonstrate
 
 1. **Same MM spent twice:** two `mm.spend→mint` events, same nullifier → second rejected.
@@ -683,6 +923,17 @@ construction, not just detectable:
    rotation delay; both are POC parameters Matthew may tune.)
 6. **Ledger anchoring in POC:** signed checkpoint file only, or also a real testnet
    anchor (adds complexity, adds credibility)?
+7. **Trust-graph parameters (§9D, v0.4):** standing threshold N, vouch budget,
+   attestation expiry, dispute window — POC defaults proposed in §9D
+   (N = 2 clusters, budget 10, 1-year expiry, 7-day window); tune or adopt?
+8. **Adapter weights (§9D):** the per-source weight cap and the relative
+   weights (VC/EAS and BrightID high; Proof of Humanity mid; PGP low) —
+   adopt as proposed, or set a different table?
+9. **Aging parameters (§9E):** half-life (proposed 30 days), freeze threshold
+   (proposed ~6 half-lives / 180 days idle), recharge cooldown (proposed 24h).
+   These set the economy's circulation pressure; they are Matthew's to set.
+10. **Institutional stripping (§9D):** who may run a stripping service at
+    launch — accountant nodes only, or any institution in good standing?
 
 ---
 
@@ -705,7 +956,13 @@ construction, not just detectable:
 | Everything connected on-chain with signed hashes (2026-10-19) | Spec v1.0 §10 (anchored event ledger) | §2A: all events signed + hash-linked; batch Merkle roots anchored on public chain |
 | Web2/LinkedIn attestation without LinkedIn's help (2026-10-19) | Spec v1.0 §6 (decentralized trust graph, multiple attestations) | §9A: zkTLS — cert-anchored session proof → ZK claim → profile-nullifier Sybil guard |
 | ZK proofs default, data sharing set by the parties (2026-10-19) | idea.md (selective-disclosure VCs, BBS+/SD-JWT) | §4 L0–L3 levels, default L0; §2A rule 4: private data never on-chain |
+| Joining by vouching: members attest a joiner's self-submitted name/email/photo; unattested wallets can't receive (2026-10-22) | Spec v1.0 §6 (decentralized trust graph, multiple attestations) | §9D: `identity.attest` events per attribute, standing + pending-receipt rule, vouch budgets, challenge window, attester accountability |
+| Link into all external trust networks as compounding evidence (2026-10-23) | — (new; BrightID / Proof of Humanity / EAS / PGP / Human Passport are external systems) | §9D adapters: verify natively, import as weighted Gcoin-native attestations, per-source weight caps; advisory only, never in the tx path |
+| Identity retained (hidden) on the coin; sender sets access rights per bit; trust chain exposes liars (2026-10-23) | idea.md (selective-disclosure VCs, BBS+/SD-JWT); §4 L0–L3 (refined, not replaced) | §9D per-bit provenance envelope (public/recipient/attesters/sealed) + trust-chain evaluation as local acceptance policy |
+| Institutions strip identity so coins stay fungible (2026-10-23) | Abstract §2; Spec v1.0 §7 | §9D institutional stripping: §4 mode 3 + service attestation replacing the readable chain; sealed pre-strip provenance retained for disputes |
+| Coins age with a half-life tied to circulation; frozen at max age; hoarding impossible; collectors may hold dead coins (2026-10-23) | Spec v1.0 §14–15 (thermodynamics: vitality decay/recharge) | §9E: vitality = 2^(−idle/half-life); circulation recharger (distinct-standing wallets, cooldown); freeze = inert collectible in the collection view; no revival |
 
 *Deliberate deviations from repo docs in the POC:* per-minute accrual chosen over
 ambiguous lump issuance; 60/40 committed/liquid floats reduced to a budget bar;
-vitality decay modeled as hooks only; proof-of-personhood mocked.
+vitality decay specified in §9E (v0.4) but not implemented in the POC;
+proof-of-personhood mocked.
